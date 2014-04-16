@@ -2,7 +2,21 @@
 #include <DualMC33926MotorShield.h>
 #include <RobotBase.h>
 #include <Encoder.h>
+#include <SharpIR.h>
 #include <Pins.h>
+
+// (Sensor Pin, No. Samples, % Range, Model)
+SharpIR irR(IR_F, 40, 93, 20150); 
+SharpIR irFR(IR_F, 40, 93, 1080);
+SharpIR irF(IR_F, 40, 93, 1080);
+SharpIR irFL(IR_F, 40, 93, 1080);
+SharpIR irL(IR_F, 40, 93, 20150);
+
+int irRDist;
+int irFRDist;
+int irFDist;
+int irFLDist;
+int irLDist;
 
 unsigned long basePeriod = 1;
 unsigned long lastBase;
@@ -17,18 +31,51 @@ unsigned long curMillis;
 
 #define TURN_THETA 0.1
 
+/*
+  There are three known arena sizes
+  1 - official arena size 7'x12'
+  2 - contigent arena size ?x?
+  3 - home arena size 4'x8'
+*/
+#define ARENA 3
+
+#if ARENA == 1
+  #define MAX_X 
+  #define MAX_Y 
+  #define MIN_X 
+  #define MIN_Y 
+#endif
+
+#if ARENA == 2
+  #define MAX_X 
+  #define MAX_Y 
+  #define MIN_X 
+  #define MIN_Y 
+#endif
+
+#if ARENA == 3
+  #define MAX_X 50  
+  #define MAX_Y 230
+  #define MIN_X -50
+  #define MIN_Y 0
+#endif
+
 Encoder m1Enc(m1EncA, m1EncB); 
 Encoder m2Enc(m2EncB, m2EncA); // reversed so forward counts up
 
 DualMC33926MotorShield md;
 
 //x, y pairs. X is forward and 0 degree heading
-double wayPts[] = {
-  100.0,   0.0,
-  100.0, 100.0,
-  0.0,   100.0,
-  0.0,     0.0
+double wayPts[4][2] = {
+  {100.0,   0.0},
+  {100.0, 100.0},
+  {0.0,   100.0},
+  {0.0,     0.0}
 };
+
+// x, y positions of cans
+double canPts[10][2];
+int canCnt = 0;
 
 double turnThresh = 0.05;
 
@@ -53,7 +100,7 @@ void setup() {
   // -deadZone > X < deadZone : X = 0
   // X < min : X = min
   // X > max : x = max
-  RobotBase.setOutput(400, 10, 50);
+  RobotBase.setOutput(350, 10, 50);
 
   //set ticks per desired distance unit
   RobotBase.setTicksPerUnit(71.65267); //units of cm
@@ -75,13 +122,8 @@ void loop() {
     curMillis = millis();
 
     double x = RobotBase.getX(), y = RobotBase.getY(), t = RobotBase.getTheta();
-    double dX = wayPts[curPt * 2] - x, dY = wayPts[curPt * 2 + 1] - y;
+    double dX = wayPts[curPt][1] - x, dY = wayPts[curPt][2] - y;
     double dist = hypot(dX, dY);
-
-    /*Serial.print("D");
-     Serial.print(dist);
-     Serial.print("/");
-     Serial.println(DIST);*/
 
     if (dist < DIST) {
       curPt++;
