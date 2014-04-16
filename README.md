@@ -1,0 +1,3 @@
+This project is the CanCan competition code for the GSR3 robot. The robot is controlled by a Teensy3.1
+
+In order to compile the code in this package, the teensyduino patch for the Arduino IDE must be installed. Any other libraries outside of the core Arduino and Teensyduino libraries are stored in the libraries folder. The easiest way to include the package into Arduino is to use the Arduino preferences to specify the gsr3-cancan folder as the sketchbook folder. Then after restarting the IDE, all of the libraries and sketches will be available from the Arduino IDE.
