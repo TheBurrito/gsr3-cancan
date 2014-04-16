@@ -72,6 +72,9 @@ void CRobotBase::updateOdometry(const long& encL, const long& encR, const double
 	_dDistL = distL - _lastDistL;
 	_dDistR = distR - _lastDistR;
 	
+	_lastDistL = distL;
+	_lastDistR = distR;
+	
 	forward = (_dDistL + _dDistR) / 2.0;
 	_velL = _dDistL / dt;
 	_velR = _dDistR / dt;
