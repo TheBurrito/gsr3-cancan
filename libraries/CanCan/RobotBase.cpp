@@ -43,6 +43,11 @@ void CRobotBase::update(const long& encL, const long& encR, const double& target
 	updateVelocity(targetVel, targetTurn, dt);
 }
 
+void CRobotBase::reset() {
+	SimplePID::resetPID(_pidL);
+	SimplePID::resetPID(_pidR);
+}
+
 double CRobotBase::getTheta() {
 	return _theta;
 }
@@ -80,6 +85,12 @@ void CRobotBase::updateOdometry(const long& encL, const long& encR, const double
 	_velR = _dDistR / dt;
 	
 	_theta += (double)(_dDistR - _dDistL) / _width;
+	if (_theta > PI) {
+		_theta -= TWO_PI;
+	} else if (_theta < -PI) {
+		_theta += TWO_PI;
+	}
+	
 	_posX += cos(_theta) * forward;
 	_posY += sin(_theta) * forward;
 }
@@ -89,11 +100,12 @@ template <typename T> int sgn(T val) {
 }
 
 void CRobotBase::updateVelocity(double targetVel, double targetTurn, const double& dt) {
-	if (targetVel > _maxVel) targetVel = _maxVel;
-	else if (targetVel < -_maxVel) targetVel = -_maxVel;
 	
 	if (targetTurn > _maxTurn) targetTurn = _maxTurn;
 	else if (targetTurn < -_maxTurn) targetTurn = -_maxTurn;
+	
+	if (targetVel > _maxVel) targetVel = _maxVel;
+	else if (targetVel < -_maxVel) targetVel = -_maxVel;
 	
 	double turn = 0.5 * _width * targetTurn;
 	double leftVel = targetVel - turn;

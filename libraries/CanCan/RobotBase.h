@@ -17,6 +17,8 @@ public:
 	
 	void update(const long& encL, const long& encR, const double& targetVel, const double& targetTurn, const double& dt);
 	
+	void reset();
+	
 	double getTheta();
 	double getX();
 	double getY();
@@ -39,6 +41,8 @@ private:
 	double _curVelL, _curVelR;
 	
 	double _theta, _posX, _posY;
+	
+	double _thetaAccel, _curTurn;
 	
 	double _velL, _velR;
 	
