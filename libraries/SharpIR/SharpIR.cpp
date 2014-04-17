@@ -74,7 +74,7 @@ SharpIR::SharpIR(int irPin, int avg, int tolerance, int sensorModel) {
 int SharpIR::cm() {
     
     int raw=analogRead(_irPin);
-    float voltFromRaw=map(raw, 0, 1023, 0, 5000);
+    float voltFromRaw=map(raw, 0, 1023, 0, 3300);
     
     int puntualDistance;
     
