@@ -3,14 +3,22 @@
 #include <RobotBase.h>
 #include <Encoder.h>
 #include <SharpIR.h>
+#include <TimedAction.h>
+#include <Wire.h>
+#include <Adafruit_MCP23017.h>
+#include <Adafruit_RGBLCDShield.h>
 #include <Pins.h>
 
+#define DEBUG_USE_LCD true
+#define DEBUG_USE_SERIAL false
+#define DEBUG_IR true
+
 // (Sensor Pin, No. Samples, % Range, Model)
-SharpIR irR(IR_F, 40, 93, 20150); 
-SharpIR irFR(IR_F, 40, 93, 1080);
+SharpIR irL(IR_L, 40, 93, 20150);
+SharpIR irFL(IR_FL, 40, 93, 1080);
 SharpIR irF(IR_F, 40, 93, 1080);
-SharpIR irFL(IR_F, 40, 93, 1080);
-SharpIR irL(IR_F, 40, 93, 20150);
+SharpIR irFR(IR_FR, 40, 93, 1080);
+SharpIR irR(IR_R, 40, 93, 20150); 
 
 int irRDist;
 int irFRDist;
@@ -18,7 +26,24 @@ int irFDist;
 int irFLDist;
 int irLDist;
 
-unsigned long basePeriod = 1;
+TimedAction irAction = TimedAction(500,readIrSensors);  // Scan IR Sensors every 800ms
+#if DEBUG_IR
+  TimedAction debugIrAction = TimedAction(1000,debugIr);
+#endif
+
+Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
+
+// These #defines make it easy to set the backlight color
+#define OFF 0x0
+#define RED 0x1
+#define GREEN 0x2
+#define YELLOW 0x3
+#define BLUE 0x4
+#define VIOLET 0x5
+#define TEAL 0x6
+#define WHITE 0x7
+
+unsigned long basePeriod = 10;
 unsigned long lastBase;
 unsigned long curMillis;
 
@@ -67,10 +92,10 @@ DualMC33926MotorShield md;
 
 //x, y pairs. X is forward and 0 degree heading
 double wayPts[4][2] = {
-  {100.0,   0.0},
-  {100.0, 100.0},
-  {0.0,   100.0},
-  {0.0,     0.0}
+  {50.0,  0.0},
+  {50.0, 50.0},
+  { 0.0, 50.0},
+  { 0.0,  0.0}
 };
 
 // x, y positions of cans
@@ -90,10 +115,10 @@ void setup() {
   RobotBase.setPID(BASE_P, BASE_I, BASE_D);
 
   //Set allowed accel for wheel velocity targets (cm/s/s)
-  RobotBase.setAccel(0.1);
+  RobotBase.setAccel(0.5);
 
   //Set max velocity and turn rate
-  RobotBase.setMax(50, 1.0); //30cm/s, 0.2 Rad/s
+  RobotBase.setMax(30, 3.14); //30cm/s, 0.2 Rad/s
 
   //set motor output ranges - works both positive and negative
   //Max, dead zone, min
@@ -111,13 +136,18 @@ void setup() {
   Serial.begin(115200);
 
   curPt = 0;
-
+  lcdInit();
   delay(2000);
 
   lastBase = millis();
 }
 
 void loop() {
+//  irAction.check();
+//  #if DEBUG_IR
+//    debugIrAction.check();
+//  #endif
+  
   if (curPt < numPts) {
     curMillis = millis();
 
@@ -157,18 +187,6 @@ void loop() {
           turnThresh = 0.3;
         }
 
-        /*Serial.print(curPt);
-         Serial.print(": ");
-         
-         Serial.print("d");
-         Serial.print(dist);
-         Serial.print(" v");
-         Serial.print(targetVel);
-         Serial.print(" t");
-         Serial.print(t);
-         Serial.print(" a");
-         Serial.println(targetTurn);*/
-
         RobotBase.update(encL, encR, targetVel, targetTurn, 0.001 * basePeriod);
 
         md.setM1Speed(RobotBase.getLeftOut());
@@ -182,7 +200,92 @@ void loop() {
 
     delay(100);
   }
+  
 }
 
+void readIrSensors() {
+  float _objX,_objY,sensTheta;
+  irRDist  = irR.distance();
+  irLDist  = irL.distance();
+  
+  irFLDist = irFL.distance();
+  if (irFLDist > 10 && irFLDist < 80) {  // ignore values outside the sensors specs
+    // calculate detected objects x,y position
+    //sensTheta = RobotBase.getTheta() - HALF_PI;
+    _objX = irFLDist * (0.573576436) + RobotBase.getX();
+    _objY = irFLDist * (0.819152044) + RobotBase.getY();
+    canPts[canCnt][0] = _objX;
+    canPts[canCnt][1] = _objY;
+    +canCnt;
+    
+//    lcd.clear();
+//    lcd.setCursor(0,0);
+//    lcd.print(irFLDist);
+    lcd.setCursor(0,1);
+    lcd.print(int(_objX));
+    lcd.print(" ");
+    lcd.print(int(_objY));
+     
+  irFRDist = irFR.distance();
+  if (irFRDist > 10 && irFRDist < 80) {  // ignore values outside the sensors specs
+    _objX = irFRDist * (0.819152044) + RobotBase.getX();
+    _objY = irFRDist * (0.573576436) + RobotBase.getY();
+    
+    lcd.print("  ");
+    lcd.print(int(_objX));
+    lcd.print(" ");
+    lcd.print(int(_objY));
+      
+  }
+    
+}
 
+  irFDist  = irF.distance();
+//  if (irFRDist > 10 && irFRDist < 80) {  // ignore values outside the sensors specs
+    
+//  }
 
+//  if (irFRDist > 10 && irFRDist < 80) {  // ignore values outside the sensors specs
+    
+//  }
+  
+}
+
+void lcdInit() {
+
+  // set up the LCD's number of columns and rows: 
+  lcd.begin(16, 2);
+  lcd.setBacklight(WHITE);
+}
+
+void debugIr() {
+  #if DEBUG_USE_LCD
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("");
+    lcd.print(irFLDist);
+    lcd.print(",");
+    lcd.print(irFDist);
+    lcd.print(",");
+    lcd.print(irFRDist);
+ /*   
+    lcd.setCursor(0,1);
+    lcd.print("");
+    lcd.print(irLDist);
+    lcd.print(",");
+    lcd.print(irRDist);
+*/
+  #endif
+  #if DEBUG_USE_SERIAL
+  Serial.print("Right      : ");  
+  Serial.println(irRDist);
+  Serial.print("Front Right: ");  
+  Serial.println(irFRDist);
+  Serial.print("Front      : ");  
+  Serial.println(irFDist);
+  Serial.print("Front Left : ");  
+  Serial.println(irFLDist);
+  Serial.print("Left       : ");
+  Serial.println(irLDist);
+  #endif
+}
