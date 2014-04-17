@@ -122,7 +122,7 @@ void loop() {
     curMillis = millis();
 
     double x = RobotBase.getX(), y = RobotBase.getY(), t = RobotBase.getTheta();
-    double dX = wayPts[curPt][1] - x, dY = wayPts[curPt][2] - y;
+    double dX = wayPts[curPt][0] - x, dY = wayPts[curPt][1] - y;
     double dist = hypot(dX, dY);
 
     if (dist < DIST) {
