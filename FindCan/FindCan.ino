@@ -14,11 +14,11 @@
 #define DEBUG_IR true
 
 // (Sensor Pin, No. Samples, % Range, Model)
-SharpIR irL(IR_L, 40, 93, 20150);
-SharpIR irFL(IR_FL, 40, 93, 1080);
-SharpIR irF(IR_F, 40, 93, 1080);
-SharpIR irFR(IR_FR, 40, 93, 1080);
-SharpIR irR(IR_R, 40, 93, 20150); 
+SharpIR irL(IR_L, 20, 93, 20150);
+SharpIR irFL(IR_FL, 20, 93, 1080);
+SharpIR irF(IR_F, 20, 93, 1080);
+SharpIR irFR(IR_FR, 20, 93, 1080);
+SharpIR irR(IR_R, 20, 93, 20150); 
 
 int irRDist;
 int irFRDist;
@@ -143,7 +143,7 @@ void setup() {
 }
 
 void loop() {
-//  irAction.check();
+  irAction.check();
 //  #if DEBUG_IR
 //    debugIrAction.check();
 //  #endif
@@ -204,11 +204,11 @@ void loop() {
 }
 
 void readIrSensors() {
+  long _start = millis();
   float _objX,_objY,sensTheta;
-  irRDist  = irR.distance();
-  irLDist  = irL.distance();
   
   irFLDist = irFL.distance();
+  Serial.println(millis() - _start);
   if (irFLDist > 10 && irFLDist < 80) {  // ignore values outside the sensors specs
     // calculate detected objects x,y position
     //sensTheta = RobotBase.getTheta() - HALF_PI;
@@ -218,36 +218,42 @@ void readIrSensors() {
     canPts[canCnt][1] = _objY;
     +canCnt;
     
-//    lcd.clear();
-//    lcd.setCursor(0,0);
-//    lcd.print(irFLDist);
+/*
     lcd.setCursor(0,1);
     lcd.print(int(_objX));
     lcd.print(" ");
     lcd.print(int(_objY));
-     
+*/
+  }
+       
   irFRDist = irFR.distance();
+  Serial.println(millis() - _start);
   if (irFRDist > 10 && irFRDist < 80) {  // ignore values outside the sensors specs
     _objX = irFRDist * (0.819152044) + RobotBase.getX();
     _objY = irFRDist * (0.573576436) + RobotBase.getY();
-    
+
+/*    
     lcd.print("  ");
     lcd.print(int(_objX));
     lcd.print(" ");
     lcd.print(int(_objY));
-      
+*/      
   }
-    
-}
+
 
   irFDist  = irF.distance();
-//  if (irFRDist > 10 && irFRDist < 80) {  // ignore values outside the sensors specs
+  Serial.println(millis() - _start);
+//  if (irFDist > 10 && irFDist < 80) {  // ignore values outside the sensors specs
     
 //  }
 
-//  if (irFRDist > 10 && irFRDist < 80) {  // ignore values outside the sensors specs
-    
-//  }
+
+  irLDist  = irL.distance();
+  Serial.println(millis() - _start);
+
+  irRDist  = irR.distance();
+  Serial.println(millis() - _start);
+  Serial.println("");    
   
 }
 
