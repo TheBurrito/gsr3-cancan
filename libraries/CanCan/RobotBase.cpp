@@ -236,10 +236,10 @@ void CRobotBase::update() {
 		if (!_driving) dX = 0;
 		if (!_driving && !_turning) dTheta = 0;
 		
-		Serial.print("N: ");
-		Serial.print(dX);
-		Serial.print(", ");
-		Serial.println(dTheta);
+		//Serial.print("N: ");
+		//Serial.print(dX);
+		//Serial.print(", ");
+		//Serial.println(dTheta);
 		
 		dt = (curMillis - _lastNav) * 0.001;
 		updateVelocity(dX, dTheta, dt);
