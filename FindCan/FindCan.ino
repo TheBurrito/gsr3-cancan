@@ -5,6 +5,7 @@
 #include <Wire.h>
 #include <LiquidTWI2.h>
 #include <Adafruit_RGBLCDShield.h>
+#include <Servo.h>
 #include <Pins.h>
 
 #define DEBUG_USE_LCD true
@@ -12,48 +13,54 @@
 #define DEBUG_IR false
 
 int irSamples = 10;
-// (Sensor Pin, No. Samples, % Range, Model)
-SharpIR irL(IR_L, irSamples, 93, 20150);
-SharpIR irFL(IR_FL, irSamples, 93, 1080);
-SharpIR irF(IR_F, irSamples, 93, 1080);
-SharpIR irFR(IR_FR, irSamples, 93, 1080);
-SharpIR irR(IR_R, irSamples, 93, 20150); 
+int irThresh = 93;
+// (Sensor Pin, No. Samples, % Range Threshold, Model)
+SharpIR irL(IR_L, irSamples, irThresh, 20150);
+SharpIR irFL(IR_FL, irSamples, irThresh, 1080);
+SharpIR irF(IR_F, irSamples, irThresh, 1080);
+SharpIR irFR(IR_FR, irSamples, irThresh, 1080);
+SharpIR irR(IR_R, irSamples, irThresh, 20150); 
 
-int irRDist;
-int irFRDist;
-int irFDist;
-int irFLDist;
-int irLDist;
+volatile int irLDist;
+volatile int irFLDist;
+volatile int irFDist;
+volatile int irFRDist;
+volatile int irRDist;
 
-typedef struct {
-  double x;
-  double y;
-} Point;
-
-typedef struct {
-  Point start;
-  Point mid;
-  double width;
-  
-  int lastDist;
-  bool active;
-} ObjInfo;
+Servo servoG; // define the Gripper Servo
+#define SERVO_G_CLOSE 36
+#define SERVO_G_OPEN  88
+int i;
 
 typedef enum {
   IRL,
   IRFL,
   IRFR,
   IRR,
-  
+
   IR_END
-} IR_Index;
+} 
+IR_Index;
+
+struct Point {
+  double x;
+  double y;
+};
+
+struct ObjInfo {
+  Point start;
+  Point mid;
+  double width;
+
+  int lastDist;
+  bool active;
+};
 
 ObjInfo obj[IR_END];
 
-TimedAction irAction = TimedAction(100,readIrSensors);  // Scan IR Sensors every 800ms
-#if DEBUG_IR
+
+TimedAction irAction = TimedAction(50,readIrSensors);  // Scan IR Sensors every 800ms
 TimedAction debugIrAction = TimedAction(1000,debugIr);
-#endif
 
 LiquidTWI2 lcd(0);
 
@@ -90,8 +97,8 @@ LiquidTWI2 lcd(0);
 #endif
 
 #if ARENA == 3
-#define MAX_X 40  
-#define MAX_Y 230
+#define MAX_X 200  
+#define MAX_Y 40
 #define MIN_X -40
 #define MIN_Y 0
 #endif
@@ -99,29 +106,29 @@ LiquidTWI2 lcd(0);
 // x, y positions of cans
 double canPts[6][2] = {
   {
-    0,0  }
+    0,0      }
   ,
   {
-    0,0  }
+    0,0      }
   ,
   {
-    0,0  }
+    0,0      }
   ,
   {
-    0,0  }
+    0,0      }
   ,
   {
-    0,0  }
+    0,0      }
   ,
   {
-    0,0  }  
+    0,0      }  
 };
 double FLPts[2][2] = {
   {
-    0,0  }
+    0,0      }
   ,
   {
-    0,0  }  
+    0,0      }  
 };
 
 int canCnt = 0;
@@ -142,9 +149,12 @@ Mode mode = mWander;
 
 bool left = false;
 
+bool goBot = false;  // used to wait for keypad press to start
+
 void setup() {
+
   //Establish PID gains
-  RobotBase.setPID(15, 5, 0);
+  RobotBase.setPID(10, 4, 0);
 
   //Set allowed accel for wheel velocity targets (cm/s/s)
   RobotBase.setAccel(50);
@@ -166,19 +176,32 @@ void setup() {
   RobotBase.setWidth(17.4); //units of cm
 
   RobotBase.setNavThresh(2, 0.035);
-  RobotBase.setOdomPeriod(1);
-  RobotBase.setNavPeriod(1);
+  RobotBase.setOdomPeriod(10);
+  RobotBase.setNavPeriod(10);
 
 
   Serial.begin(115200);
   lcdInit();
-  delay(2000);
+  servoG.attach(SERVO_G);  // init gripper servo
+  servoG.write(SERVO_G_OPEN);  
 
   RobotBase.driveTo(200, 0);
   RobotBase.time();
 }
 
 void loop() {
+  while (!goBot) {
+    irAction.check();
+    debugIrAction.check();
+    uint8_t buttons = lcd.readButtons();
+    if (buttons && BUTTON_UP) {
+      lcd.clear();
+      lcd.setBacklight(GREEN);
+      goBot = !goBot;  // stop everything if any button is pressed
+      delay(500);
+    }
+  }
+
   irAction.check();
 #if DEBUG_IR
   debugIrAction.check();
@@ -192,6 +215,7 @@ void loop() {
       mode = mStop;
     } 
     else if (canPts[0][0] != 0) {
+      RobotBase.setMax(20, 2.0); //cm/s, Rad/s
       RobotBase.turnTo(canPts[0][0], canPts[0][1]);
       mode = mTurnCan;
     }
@@ -210,30 +234,41 @@ void loop() {
     }
     break;
 
-
   case mGrabCan:
-
-    RobotBase.turnTo(0, MAX_Y);
-    mode = mTurnGoal;
-
+    if (RobotBase.navDone()) {
+      for ( i = SERVO_G_OPEN; i > SERVO_G_CLOSE; --i) {
+        servoG.write(i);
+        delay(20);
+      }
+      RobotBase.turnTo(MAX_X, 0);
+      mode = mTurnGoal;
+    }
     break;
 
   case mTurnGoal:
     if (RobotBase.navDone()) {
-      RobotBase.driveTo(0, MAX_Y);
+      RobotBase.setMax(60, 2.0); //cm/s, Rad/s
+      RobotBase.driveTo(MAX_X, 0);
       mode = mDriveGoal;
     }
     break;
 
   case mDriveGoal:
     if (RobotBase.navDone()) {
+
       mode = mDropCan;
     }
     break;
 
   case mDropCan:
-    RobotBase.driveTo(0, MAX_Y / 2.0);
-    mode = mWander;
+    if (RobotBase.navDone()) {
+      for ( i = SERVO_G_CLOSE; i < SERVO_G_OPEN; ++i) {
+        servoG.write(i);
+        delay(20);
+      }
+      RobotBase.driveTo(0, MAX_Y / 2.0);
+      mode = mWander;
+    }
     break;
 
   case mStop:
@@ -242,38 +277,30 @@ void loop() {
   }  
 }
 
-void readIrSensors() {
-  long _start = millis();
-  float xL,  yL
-    ,xFL, yFL
-    ,xF,  yF
-    ,xFR, yFR
-    ,xR,   yR
-    ,lastFLDist;
-  int objDistThresh = 10;
-  int objMinWidth = 3;
+void detectCan(float lastDist, float curDist) {
+  float objX, objY;
+  int objDistThresh = 15;
+  int objMinWidth = 1;
   int objMaxWidth = 14;
 
-
-  lastFLDist = irFLDist;
-  irFLDist = irFL.distance();
   if (irFLDist > 10 && irFLDist < 80) {  // ignore values outside the sensors specs
-    // calculate detected objects x,y position
+    // calculate detected object x,y position
+    objX = irFLDist * (0.573576436) + RobotBase.getX();
+    objY = irFLDist * (0.819152044) + RobotBase.getY();
 
-    xFL = irFLDist * (0.573576436) + RobotBase.getX();
-    yFL = irFLDist * (0.819152044) + RobotBase.getY();
-
-    if (lastFLDist - irFLDist > objDistThresh) {
-      FLPts[0][0] = xFL;
-      FLPts[0][1] = yFL;
+    if (lastDist - curDist > objDistThresh) {  // we found something
+      FLPts[0][0] = objX;
+      FLPts[0][1] = objY;
+      FLPts[1][0] = objX;
+      FLPts[1][1] = objY;
       left = true;
     } 
-    else if (left && irFLDist - lastFLDist > objDistThresh) {
+    else if (left && fabs(curDist - lastDist) > objDistThresh) {
       left = false;
       double dX = FLPts[0][0] - FLPts[1][0], dY = FLPts[0][1] - FLPts[1][1];
       double width = hypot(dX, dY);
 
-      if (width > objMinWidth && width < objMaxWidth){
+      if (width > objMinWidth && width < objMaxWidth){  // I think it's a can
         canPts[canCnt][0] = (FLPts[0][0] + FLPts[1][0]) / 2;
         canPts[canCnt][1] = (FLPts[0][1] + FLPts[1][1]) / 2;
         FLPts[0][0] = 0;
@@ -284,65 +311,30 @@ void readIrSensors() {
       }
     } 
     else if (left) {
-      FLPts[1][0] = xFL;
-      FLPts[1][1] = yFL;
+      FLPts[1][0] = objX;
+      FLPts[1][1] = objY;
     }
 
-    /*if (xFL > MIN_X || xFL < MAX_X) {
-      if (FLPts[0][0] == 0) {
-        FLPts[0][0] = xFL;
-        FLPts[0][1] = yFL;
-      }
-      else {
-        if (irFLDist < lastFLDist + objDistThresh && irFLDist > lastFLDist - objDistThresh) {
-          FLPts[1][0] = xFL;
-          FLPts[1][1] = yFL;
 
-        }
-        else if (irFLDist > lastFLDist + objDistThresh) {
-          double dX = FLPts[0][0] - FLPts[1][0], dY = FLPts[0][1] - FLPts[1][1];
-          double width = hypot(dX, dY);
+  }  
+}
+void readIrSensors() {
+  float lastLDist, lastFLDist, lastFDist, lastFRDist, lastRDist;
 
-          if (width > objMinWidth && width < objMaxWidth){
-            canPts[canCnt][0] = (FLPts[0][0] + FLPts[1][0]) / 2;
-            canPts[canCnt][1] = (FLPts[0][1] + FLPts[1][1]) / 2;
-            FLPts[0][0] = 0;
-            FLPts[0][1] = 0;
-            FLPts[1][0] = 0;
-            FLPts[1][1] = 0;
-            ++canCnt;
-          }
-          else {
-
-          }         
-        }
-        else if (irFLDist < lastFLDist - objDistThresh) {
-          FLPts[0][0] = xFL;
-          FLPts[0][1] = yFL;
-        }
-      }
-    }*/
-
-
-  }
-
-  /*lcd.clear();
-   lcd.setCursor(0,0);
-   lcd.print(RobotBase.getX());
-   lcd.print(" ");
-   lcd.print(RobotBase.getY());
-   
-   lcd.setCursor(0,1);
-   lcd.print(canPts[0][0]);
-   lcd.print(" ");
-   lcd.print(canPts[0][1]);*/
-
-  irFRDist = irFR.distance();
-
-  irFDist  = irF.distance();
-
+  lastLDist = irLDist;
   irLDist  = irL.distance();
 
+  lastFLDist = irFLDist;
+  irFLDist = irFL.distance();
+  detectCan(lastFLDist,irFLDist);
+
+  lastFDist = irFDist;
+  irFDist  = irF.distance();
+
+  lastFRDist = irFRDist;
+  irFRDist = irFR.distance();
+
+  lastRDist = irRDist;
   irRDist  = irR.distance();
 
 }
@@ -358,35 +350,43 @@ void debugIr() {
 #if DEBUG_USE_LCD
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("");
+  lcd.print("   ");
   lcd.print(irFLDist);
-  lcd.print(",");
+  lcd.print("  ");
   lcd.print(irFDist);
-  lcd.print(",");
+  lcd.print("  ");
   lcd.print(irFRDist);
 
-  //   lcd.print(canPts[canCnt][0]);
-  //    lcd.print(" ");
-  //    lcd.print(canPts[canCnt][1]);
-  /*   
-   lcd.setCursor(0,1);
-   lcd.print("");
-   lcd.print(irLDist);
-   lcd.print(",");
-   lcd.print(irRDist);
-   */
+  lcd.setCursor(0,1);
+  lcd.print(irLDist);
+  lcd.print(" <--  --> ");
+  lcd.print(irRDist);
 #endif
 #if DEBUG_USE_SERIAL
-  Serial.print("Right      : ");  
-  Serial.println(irRDist);
-  Serial.print("Front Right: ");  
-  Serial.println(irFRDist);
-  Serial.print("Front      : ");  
-  Serial.println(irFDist);
-  Serial.print("Front Left : ");  
-  Serial.println(irFLDist);
   Serial.print("Left       : ");
   Serial.println(irLDist);
+  Serial.print("Front Left : ");  
+  Serial.println(irFLDist);
+  Serial.print("Front      : ");  
+  Serial.println(irFDist);
+  Serial.print("Front Right: ");  
+  Serial.println(irFRDist);
+  Serial.print("Right      : ");  
+  Serial.println(irRDist);
 #endif
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
