@@ -11,14 +11,15 @@
 
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
-#define DEBUG_IR true
+#define DEBUG_IR false
 
+int irSamples = 10;
 // (Sensor Pin, No. Samples, % Range, Model)
-SharpIR irL(IR_L, 20, 93, 20150);
-SharpIR irFL(IR_FL, 20, 93, 1080);
-SharpIR irF(IR_F, 20, 93, 1080);
-SharpIR irFR(IR_FR, 20, 93, 1080);
-SharpIR irR(IR_R, 20, 93, 20150); 
+SharpIR irL(IR_L, irSamples, 93, 20150);
+SharpIR irFL(IR_FL, irSamples, 93, 1080);
+SharpIR irF(IR_F, irSamples, 93, 1080);
+SharpIR irFR(IR_FR, irSamples, 93, 1080);
+SharpIR irR(IR_R, irSamples, 93, 20150); 
 
 int irRDist;
 int irFRDist;
@@ -43,7 +44,7 @@ Adafruit_RGBLCDShield lcd = Adafruit_RGBLCDShield();
 #define TEAL 0x6
 #define WHITE 0x7
 
-unsigned long basePeriod = 10;
+unsigned long basePeriod = 20;
 unsigned long lastBase;
 unsigned long curMillis;
 
@@ -54,7 +55,7 @@ unsigned long curMillis;
 #define BASE_I 5
 #define BASE_D 0
 
-#define TURN_THETA 0.1
+#define TURN_THETA 0.15
 
 /*
   There are three known arena sizes
@@ -79,9 +80,9 @@ unsigned long curMillis;
 #endif
 
 #if ARENA == 3
-  #define MAX_X 50  
+  #define MAX_X 40  
   #define MAX_Y 230
-  #define MIN_X -50
+  #define MIN_X -40
   #define MIN_Y 0
 #endif
 
@@ -92,9 +93,9 @@ DualMC33926MotorShield md;
 
 //x, y pairs. X is forward and 0 degree heading
 double wayPts[4][2] = {
-  {50.0,  0.0},
-  {50.0, 50.0},
-  { 0.0, 50.0},
+  {200.0,  0.0},
+//  {50.0, 50.0},
+//  { 0.0, 50.0},
   { 0.0,  0.0}
 };
 
@@ -118,7 +119,7 @@ void setup() {
   RobotBase.setAccel(0.5);
 
   //Set max velocity and turn rate
-  RobotBase.setMax(30, 3.14); //30cm/s, 0.2 Rad/s
+  RobotBase.setMax(20, 3.14); //30cm/s, 0.2 Rad/s
 
   //set motor output ranges - works both positive and negative
   //Max, dead zone, min
@@ -144,9 +145,9 @@ void setup() {
 
 void loop() {
   irAction.check();
-//  #if DEBUG_IR
-//    debugIrAction.check();
-//  #endif
+  #if DEBUG_IR
+    debugIrAction.check();
+  #endif
   
   if (curPt < numPts) {
     curMillis = millis();
@@ -208,7 +209,7 @@ void readIrSensors() {
   float _objX,_objY,sensTheta;
   
   irFLDist = irFL.distance();
-  Serial.println(millis() - _start);
+//  Serial.println(millis() - _start);
   if (irFLDist > 10 && irFLDist < 80) {  // ignore values outside the sensors specs
     // calculate detected objects x,y position
     //sensTheta = RobotBase.getTheta() - HALF_PI;
@@ -216,44 +217,44 @@ void readIrSensors() {
     _objY = irFLDist * (0.819152044) + RobotBase.getY();
     canPts[canCnt][0] = _objX;
     canPts[canCnt][1] = _objY;
-    +canCnt;
-    
-/*
-    lcd.setCursor(0,1);
-    lcd.print(int(_objX));
-    lcd.print(" ");
-    lcd.print(int(_objY));
-*/
+    wayPts[curPt][0] = _objX;
+    wayPts[curPt][1] = _objY;
+    ++canCnt;
+   
   }
-       
+  /*
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print(RobotBase.getX());
+    lcd.print(" ");
+    lcd.print(RobotBase.getY());
+    lcd.setCursor(0,1);
+    lcd.print(canPts[0][0]);
+    lcd.print(" ");
+    lcd.print(canPts[0][1]);
+ */   
   irFRDist = irFR.distance();
-  Serial.println(millis() - _start);
+//  Serial.println(millis() - _start);
   if (irFRDist > 10 && irFRDist < 80) {  // ignore values outside the sensors specs
     _objX = irFRDist * (0.819152044) + RobotBase.getX();
     _objY = irFRDist * (0.573576436) + RobotBase.getY();
-
-/*    
-    lcd.print("  ");
-    lcd.print(int(_objX));
-    lcd.print(" ");
-    lcd.print(int(_objY));
-*/      
+      
   }
 
 
   irFDist  = irF.distance();
-  Serial.println(millis() - _start);
+//  Serial.println(millis() - _start);
 //  if (irFDist > 10 && irFDist < 80) {  // ignore values outside the sensors specs
     
 //  }
 
 
   irLDist  = irL.distance();
-  Serial.println(millis() - _start);
+//  Serial.println(millis() - _start);
 
   irRDist  = irR.distance();
-  Serial.println(millis() - _start);
-  Serial.println("");    
+//  Serial.println(millis() - _start);
+//  Serial.println("");    
   
 }
 
@@ -274,6 +275,10 @@ void debugIr() {
     lcd.print(irFDist);
     lcd.print(",");
     lcd.print(irFRDist);
+    
+    lcd.print(canPts[canCnt][0]);
+    lcd.print(" ");
+    lcd.print(canPts[canCnt][1]);
  /*   
     lcd.setCursor(0,1);
     lcd.print("");
