@@ -81,10 +81,14 @@ int SharpIR::cm() {
     if (_model==1080) {
         
         puntualDistance=27.728*pow(voltFromRaw/1000, -1.2045);
+        if (puntualDistance > 80) puntualDistance = 81;
+        if (puntualDistance < 10) puntualDistance  = 9;
         
     }else if (_model==20150){
     
         puntualDistance=61.573*pow(voltFromRaw/1000, -1.1068);
+        if (puntualDistance > 150) puntualDistance = 151;
+        if (puntualDistance < 20) puntualDistance  = 19;
         
     }
     
