@@ -34,7 +34,7 @@ double calcPID(PID& pid, const double error, const double dt) {
 	double i = pid.i * pid.sum;
 	double d = pid.d * (pid.error - error) / dt;
 	
-	if (pid.sum_max && pid.i) {
+	/*if (pid.sum_max && pid.i) {
 		double max = pid.sum_max - p;
 		if (i  > max ) {
 			pid.sum = max / pid.i;
@@ -43,7 +43,7 @@ double calcPID(PID& pid, const double error, const double dt) {
 			pid.sum = -max / pid.i;
 			i = max;
 		}
-	}
+	}*/
 	
 	pid.error = error;
 	

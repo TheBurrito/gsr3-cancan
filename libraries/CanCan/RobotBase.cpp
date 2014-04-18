@@ -2,9 +2,24 @@
 
 #include <Arduino.h>
 
+#include <DualMC33926MotorShield.h>
+#include <Encoder.h>
+#include "../Pins/Pins.h"
+
+Encoder m1Enc(m1EncA, m1EncB); 
+Encoder m2Enc(m2EncB, m2EncA); // reversed so forward counts up
+
+DualMC33926MotorShield md;
+
 CRobotBase RobotBase;
 
 CRobotBase::CRobotBase() {
+  md.init();
+  _lastOdom = millis();
+  _lastNav = _lastOdom;
+  
+  _driving = false;
+  _turning = false;
 }
 
 CRobotBase::~CRobotBase(){
@@ -13,6 +28,7 @@ CRobotBase::~CRobotBase(){
 void CRobotBase::setPID(const double& p, const double& i, const double& d) {
 	SimplePID::initPID(_pidL, p, i, d);
 	SimplePID::initPID(_pidR, p, i, d);
+	reset();
 }
 
 void CRobotBase::setAccel(const double& accel) {
@@ -24,7 +40,7 @@ void CRobotBase::setMax(const double& maxVelocity, const double& maxTurn) {
 	_maxTurn = maxTurn;
 }
 
-void CRobotBase::setOutput(int maxOut, int deadOut, int minOut) {
+void CRobotBase::setOutputRange(int maxOut, int deadOut, int minOut) {
 	_maxOut = maxOut;
 	_deadOut = deadOut;
 	_minOut = minOut;
@@ -100,6 +116,10 @@ template <typename T> int sgn(T val) {
 }
 
 void CRobotBase::updateVelocity(double targetVel, double targetTurn, const double& dt) {
+	//Serial.print("T: ");
+	//Serial.print(targetVel);
+	//Serial.print(", ");
+	//Serial.println(targetTurn);
 	
 	if (targetTurn > _maxTurn) targetTurn = _maxTurn;
 	else if (targetTurn < -_maxTurn) targetTurn = -_maxTurn;
@@ -111,11 +131,16 @@ void CRobotBase::updateVelocity(double targetVel, double targetTurn, const doubl
 	double leftVel = targetVel - turn;
 	double rightVel = targetVel + turn;
 	
-	if (leftVel > _curVelL + _accel) leftVel = _curVelL + _accel;
-	else if (leftVel < _curVelL - _accel) leftVel = _curVelL - _accel;
+	double accel = _accel * dt;
 	
-	if (rightVel > _curVelR + _accel) rightVel = _curVelR + _accel;
-	else if (rightVel < _curVelR - _accel) rightVel = _curVelR - _accel;
+	if (leftVel > _curVelL + accel) leftVel = _curVelL + accel;
+	else if (leftVel < _curVelL - accel) leftVel = _curVelL - accel;
+	
+	if (abs(leftVel) < accel) leftVel = 0;
+	if (abs(rightVel) < accel) rightVel = 0;
+	
+	if (rightVel > _curVelR + accel) rightVel = _curVelR + accel;
+	else if (rightVel < _curVelR - accel) rightVel = _curVelR - accel;
 	
 	_curVelL = leftVel;
 	_curVelR = rightVel;
@@ -138,4 +163,160 @@ void CRobotBase::updateVelocity(double targetVel, double targetTurn, const doubl
 	if (absR < _deadOut) _right = 0;
 	else if (absR < _minOut) _right = _minOut * signR;
 	else if (absR > _maxOut) _right = _maxOut * signR;
+
+    md.setM1Speed(_left);
+    md.setM2Speed(_right);
+}
+
+void CRobotBase::setOdomPeriod(long odom_ms) {
+	_odom_ms = odom_ms;
+}
+
+void CRobotBase::setNavPeriod(long nav_ms) {
+	_nav_ms = nav_ms;
+}
+
+void CRobotBase::update() {
+	unsigned long curMillis = millis();
+	double dt;
+	
+	if (_lastOdom + _odom_ms <= curMillis) {
+		long encL = m1Enc.read();
+		long encR = m2Enc.read();
+		
+		dt = (curMillis - _lastOdom) * 0.001;
+		
+		updateOdometry(encL, encR, dt);
+		
+		_lastOdom = curMillis;
+	}
+	
+	curMillis = millis();
+	
+	if (_lastNav + _nav_ms <= curMillis) {
+		double dX;
+		double dTheta;
+		
+		if (_driving || _turning) {
+			dX = _navX - _posX;
+			double dY = _navY - _posY;
+			double dist = hypot(dX, dY);
+			
+			if (_driving && dist < _navThresh) {
+				_driving = false;
+			}
+			
+			double targetTheta = 0;
+			if (_driving) {
+				targetTheta = atan2(dY, dX);
+			} else if (_turning){
+				targetTheta = _navTheta;
+			}
+			
+			dTheta = targetTheta - _theta;
+			
+			while (dTheta > PI) {
+				dTheta -= TWO_PI;
+			}
+			
+			while (dTheta < -PI) {
+				dTheta += TWO_PI;
+			}
+			
+			dTheta *= 2;
+			
+			if (_driving) {
+				dX = cos(dTheta) * dist;
+			} else if (_turning && abs(dTheta) < _thetaThresh) {
+				_turning = false;
+				dTheta = 0;
+			}
+		}
+		
+		if (!_driving) dX = 0;
+		if (!_driving && !_turning) dTheta = 0;
+		
+		Serial.print("N: ");
+		Serial.print(dX);
+		Serial.print(", ");
+		Serial.println(dTheta);
+		
+		dt = (curMillis - _lastNav) * 0.001;
+		updateVelocity(dX, dTheta, dt);
+		
+		_lastNav = curMillis;
+	}				
+}
+
+void CRobotBase::setMaxVel(const double& maxVelocity) {
+	_maxVel = maxVelocity;
+}
+
+void CRobotBase::setMaxTurn(const double& maxTurn) {
+	_maxTurn = maxTurn;
+}
+
+void CRobotBase::setNavThresh(const double& posThresh, const double& thetaThresh) {
+	_navThresh = posThresh;
+	_thetaThresh = thetaThresh;
+}
+
+void CRobotBase::setPosThresh(const double& posThresh) {
+	_navThresh = posThresh;
+}
+
+void CRobotBase::setHeadingThresh(const double& thetaThresh) {
+	_thetaThresh = thetaThresh;
+}
+
+void CRobotBase::driveTo(const double x, const double& y) {
+	_navX = x;
+	_navY = y;
+	
+	_driving = true;
+	_turning = false;
+	reset();
+}
+
+void CRobotBase::driveTo(const double x, const double& y, const double& theta) {
+	_navX = x;
+	_navY = y;
+	_navTheta = theta;
+	
+	_driving = true;
+	_turning = true;
+	reset();
+}
+
+void CRobotBase::turnTo(const double& theta) {
+	_navTheta = theta;
+	
+	_driving = false;
+	_turning = true;
+	reset();
+}
+
+void CRobotBase::turnTo(const double& x, const double& y) {
+	double dX = x - _posX;
+	double dY = y - _posY;
+	_navTheta = atan2(dY, dX);
+	
+	_driving = false;
+	_turning = true;
+	reset();
+}
+
+void CRobotBase::stop() {
+	_driving = false;
+	_turning = false;
+	reset();
+}
+
+void CRobotBase::time() {
+	_lastOdom = millis();
+	_lastNav = _lastOdom;
+}
+
+bool CRobotBase::navDone() {
+	return !(_driving || _turning);
 }

@@ -2,6 +2,7 @@
  * http://www.pjrc.com/teensy/td_libs_Encoder.html
  * Copyright (c) 2011,2013 PJRC.COM, LLC - Paul Stoffregen <paul@pjrc.com>
  *
+ * Version 1.2 - fix -2 bug in C-only code
  * Version 1.1 - expand to support boards with up to 60 interrupts
  * Version 1.0 - initial release
  * 
@@ -37,14 +38,14 @@
 #include "pins_arduino.h"
 #endif
 
-#include "../Encoder/utility/direct_pin_read.h"
+#include "utility/direct_pin_read.h"
 
 #if defined(ENCODER_USE_INTERRUPTS) || !defined(ENCODER_DO_NOT_USE_INTERRUPTS)
 #define ENCODER_USE_INTERRUPTS
 #define ENCODER_ARGLIST_SIZE CORE_NUM_INTERRUPT
-#include "../Encoder/utility/interrupt_pins.h"
+#include "utility/interrupt_pins.h"
 #ifdef ENCODER_OPTIMIZE_INTERRUPTS
-#include "../Encoder/utility/interrupt_config.h"
+#include "utility/interrupt_config.h"
 #endif
 #else
 #define ENCODER_ARGLIST_SIZE 0
@@ -284,7 +285,7 @@ private:
 				arg->position += 2;
 				return;
 			case 6: case 9:
-				arg->position += 2;
+				arg->position -= 2;
 				return;
 		}
 #endif
