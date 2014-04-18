@@ -1,3 +1,6 @@
+#ifndef PINS_H_
+#define PINS_H_
+
 #define m2EncA 3          // pin 3 (PWM / INT1)
 // Motor Controller D2     // pin 4
 #define m2EncB 5           // pin 6 (PWM)
@@ -28,6 +31,8 @@
 // pin 29 (A18)
 // pin 30 (A19)
 #define IR_FL  A20 // pin 31 (A20)
-int SERVO_G =  32; // pin 32 (PWM)
+extern int SERVO_G; // pin 32 (PWM)
 #define IRB_FL 33  // pin 33
 #define IR_L   A13 // pin A13 (Analog Only)
+
+#endif //PINS_H_
