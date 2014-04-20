@@ -14,13 +14,36 @@ DualMC33926MotorShield md;
 CRobotBase RobotBase;
 
 CRobotBase::CRobotBase() {
-  md.init();
-  _lastOdom = millis();
-  _lastNav = _lastOdom;
+  	md.init();
+  	_lastOdom = millis();
+  	_lastNav = _lastOdom;
   
-  _driving = false;
-  _turning = false;
-  _turnFirst = false;
+  	_driving = false;
+  	_turning = false;
+  	_turnFirst = false;
+  
+    analogReference(DEFAULT);
+    
+    _irPins[IRL] = IR_L;
+    _irPins[IRFL] = IR_FL;
+    _irPins[IRF] = IR_F;
+    _irPins[IRFR] = IR_FR;
+    _irPins[IRR] = IR_R;
+    
+    _irModels[IRL] = IR_20150;
+    _irModels[IRFL] = IR_1080;
+    _irModels[IRF] = IR_1080;
+    _irModels[IRFR] = IR_1080;
+    _irModels[IRR] = IR_20150;
+    
+    for (int i = 0; i < IR_END; ++i) {
+    	pinMode(_irPins[i], INPUT);
+	}
+	
+	_distSumL = 0;
+	_distSumR = 0;
+	_posX = 0;
+	_posY = 0;
 }
 
 CRobotBase::~CRobotBase(){
@@ -53,11 +76,6 @@ void CRobotBase::setTicksPerUnit(const double& tpu) {
 
 void CRobotBase::setWidth(const double& width) {
 	_width = width;
-}
-
-void CRobotBase::update(const long& encL, const long& encR, const double& targetVel, const double& targetTurn, const double& dt) {
-	updateOdometry(encL, encR, dt);
-	updateVelocity(targetVel, targetTurn, dt);
 }
 
 void CRobotBase::reset() {
@@ -97,6 +115,9 @@ void CRobotBase::updateOdometry(const long& encL, const long& encR, const double
 	_lastDistL = distL;
 	_lastDistR = distR;
 	
+	_distSumL += _dDistL;
+	_distSumR += _dDistR;
+	
 	forward = (_dDistL + _dDistR) / 2.0;
 	_velL = _dDistL / dt;
 	_velR = _dDistR / dt;
@@ -116,7 +137,7 @@ template <typename T> int sgn(T val) {
     return (T(0) < val) - (val < T(0));
 }
 
-void CRobotBase::updateVelocity(double targetVel, double targetTurn, const double& dt) {
+void CRobotBase::updateVelocity(double targetVel, double targetTurn, const double& dt) {	
 	//Serial.print("T: ");
 	//Serial.print(targetVel);
 	//Serial.print(", ");
@@ -146,11 +167,27 @@ void CRobotBase::updateVelocity(double targetVel, double targetTurn, const doubl
 	_curVelL = leftVel;
 	_curVelR = rightVel;
 	
+	_velL = _distSumL / dt;
+	_velR = _distSumR / dt;
+	
+	_distSumL = 0;
+	_distSumR = 0;
+	
+	//Serial.print("V: ");
+	//Serial.print(_velL);
+	//Serial.print(", ");
+	//Serial.println(_velR);
+	
 	double errorL = leftVel - _velL;
 	double errorR = rightVel - _velR;
 	
-	_left = (int)SimplePID::calcPID(_pidL, errorL, dt);
-	_right = (int)SimplePID::calcPID(_pidR, errorR, dt);
+	//Serial.print("E: ");
+	//Serial.print(errorL);
+	//Serial.print(", ");
+	//Serial.println(errorR);
+	
+	_left = (int)(SimplePID::calcPID(_pidL, errorL, dt) /*+ errorL * 7*/);
+	_right = (int)(SimplePID::calcPID(_pidR, errorR, dt) /*+ errorR * 7*/);
 	
 	int signL = sgn(_left);
 	int signR = sgn(_right);
@@ -177,6 +214,18 @@ void CRobotBase::setNavPeriod(long nav_ms) {
 	_nav_ms = nav_ms;
 }
 
+void CRobotBase::setIRPeriod(long ir_ms) {
+	_ir_ms = ir_ms;
+}
+
+int CRobotBase::irDistance(IR_Index ir) {
+	return _irDist[ir];
+}
+
+int CRobotBase::irDiff(IR_Index ir) {
+	return _irDist[ir] - _irPrevDist[ir];
+}
+
 void CRobotBase::update() {
 	unsigned long curMillis = millis();
 	double dt;
@@ -193,14 +242,19 @@ void CRobotBase::update() {
 	}
 	
 	curMillis = millis();
+	if (_lastIR + _ir_ms <= curMillis) {
+		readAllIR();
+	}
 	
+	curMillis = millis();
 	if (_lastNav + _nav_ms <= curMillis) {
-		double dX;
+		double dX, dY;
 		double dTheta;
+		double targetVelocity = 0, targetTurn = 0;
 		
 		if (_driving || _turning) {
 			dX = _navX - _posX;
-			double dY = _navY - _posY;
+			dY = _navY - _posY;
 			double dist = hypot(dX, dY);
 			
 			if (_driving && dist < _navThresh) {
@@ -230,33 +284,79 @@ void CRobotBase::update() {
 				dX = cos(dTheta) * dist;
 			} else if (_turning && abs(dTheta) < _thetaThresh) {
 				_turning = false;
-				dTheta = 0;
-			}
-		}
-		
-		if (!_driving) {
-			dX = 0;
-			
-			if (!_turning) {
-				dTheta = 0;
-				
 				if (_turnFirst) {
-					_driving = true;
 					_turnFirst = false;
+					_driving = true;
+					dX = 0;
 				}
+				
+				dTheta = 0;
 			}
 		}
 		
-		//Serial.print("N: ");
-		//Serial.print(dX);
-		//Serial.print(", ");
-		//Serial.println(dTheta);
+		if (_velocity) {
+			targetVelocity = _targetVelocity;
+			targetTurn = _targetTurn;
+		} else if (_driving) {
+			targetVelocity = dX;
+			targetTurn = dTheta;
+		} else if (_turning) {
+			targetVelocity = 0;
+			targetTurn = dTheta;
+		}
 		
 		dt = (curMillis - _lastNav) * 0.001;
-		updateVelocity(dX, dTheta, dt);
+		updateVelocity(targetVelocity, targetTurn, dt);
 		
 		_lastNav = curMillis;
 	}				
+}
+	
+void CRobotBase::setVelocityAndTurn(const double& vel, const double& turn) {
+	stop();
+	
+	_targetVelocity = vel;
+	_targetTurn = turn;
+	
+	_velocity = true;
+}
+
+
+	
+int CRobotBase::readIR(IR_Index ir) {
+	int raw=analogRead(_irPins[ir]);
+    float voltFromRaw=raw * 3.225806452; //based on 3.3V reference
+    
+    int puntualDistance = -1;
+    
+    switch (_irModels[ir]) {
+    case IR_1080:
+        puntualDistance=27.728*pow(voltFromRaw/1000, -1.2045);
+        if (puntualDistance > 80) puntualDistance = 81;
+        if (puntualDistance < 10) puntualDistance  = 9;
+        break;
+        
+        
+    case IR_20150:
+        puntualDistance=61.573*pow(voltFromRaw/1000, -1.1068);
+        if (puntualDistance > 150) puntualDistance = 151;
+        if (puntualDistance < 20) puntualDistance  = 19;
+        break;
+    }
+    
+    _irDist[ir] = puntualDistance * _irFact + _irPrevDist[ir] * (1.0 - _irFact);
+    
+    return puntualDistance;
+}
+	
+void CRobotBase::setIRFilter(double factor) {
+	_irFact = factor;
+}
+
+void CRobotBase::readAllIR() {
+	for (int i = 0; i < IR_END; ++i) {
+		readIR((IR_Index)i);
+	}
 }
 
 void CRobotBase::setMaxVel(const double& maxVelocity) {
@@ -319,15 +419,11 @@ void CRobotBase::turnTo(const double& x, const double& y) {
 }
 
 void CRobotBase::turnToAndDrive(const double& x, const double& y) {
-	stop();
+	turnTo(x, y);
 	
-	double dX = x - _posX;
-	double dY = y - _posY;
-	_navTheta = atan2(dY, dX);
 	_navX = x;
 	_navY = y;
 	
-	_turning = true;
 	_turnFirst = true;
 }
 
@@ -335,12 +431,14 @@ void CRobotBase::stop() {
 	_driving = false;
 	_turning = false;
 	_turnFirst = false;
+	_velocity = false;
 	reset();
 }
 
 void CRobotBase::time() {
 	_lastOdom = millis();
 	_lastNav = _lastOdom;
+	_lastIR = _lastOdom;
 }
 
 bool CRobotBase::navDone() {

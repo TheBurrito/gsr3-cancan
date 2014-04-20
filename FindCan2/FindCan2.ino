@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <RobotBase.h>
-#include <SharpIR.h>
 #include <TimedAction.h>
 #include <Wire.h>
 #include <LiquidTWI2.h>
@@ -12,36 +11,10 @@
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
 
-int irSamples = 1;
-int irThresh = 90;
-// (Sensor Pin, No. Samples, % Range Threshold, Model)
-SharpIR irL(IR_L, irSamples, irThresh, 20150);
-SharpIR irFL(IR_FL, irSamples, irThresh, 1080);
-SharpIR irF(IR_F, irSamples, irThresh, 1080);
-SharpIR irFR(IR_FR, irSamples, irThresh, 1080);
-SharpIR irR(IR_R, irSamples, irThresh, 20150);
-
-volatile int irLDist;
-volatile int irFLDist;
-volatile int irFDist;
-volatile int irFRDist;
-volatile int irRDist;
-
 Servo servoG; // define the Gripper Servo
 #define SERVO_G_CLOSE 36
 #define SERVO_G_OPEN  88
 int i;
-
-typedef enum {
-  IRL,
-  IRFL,
-  IRF,
-  IRFR,
-  IRR,
-
-  IR_END
-} 
-IR_Index;
 
 struct Point {
   double x;
@@ -53,6 +26,8 @@ struct ObjInfo {
   Point last;
   double width;
   bool active;
+  int curDist;
+  int lastDist;
 };
 
 ObjInfo obj[IR_END];
@@ -124,19 +99,28 @@ LiquidTWI2 lcd(0);
 #endif
 
 typedef enum {
+  mWaitStart,
+  mWait1Sec,
   mWander,
-  mTurnCan,
   mDriveCan,
   mGrabCan,
-  mTurnGoal,
   mDriveGoal,
   mDropCan,
+  mBackup,
   mStop
 } 
 Mode;
 
-Mode mode = mWander, lastMode = mode;
-// x, y positions of cans
+Mode mode = mWander, lastMode = mode, nextMode;
+
+bool newState = true, restart = false;
+
+int curGrip, gripStep = 1, gripDelay = 20;
+long lastGrip;
+
+unsigned long targetTime;
+
+bool atGoal = false;
 
 struct canInfo {
   unsigned long ts;  // timestamp
@@ -147,25 +131,21 @@ struct canInfo {
 const int canCapacity = 20;
 canInfo cans[canCapacity];
 int targetCan = -1;  // index for cans[]
-int nextCan;
+int nextCan = 0;
 bool firstCan = true;  // flag used for fist can we search for
 
-bool left = false;
-
-bool goBot = false;  // used to wait for keypad press to start
-
-bool newState = true;
+uint8_t buttons;
 
 void setup() {
 
   for (int i = 0; i < IR_END; i++) {
     obj[i].active = false;
   }
-  
+
   for (int i = 0; i < canCapacity; i++) {
     cans[i].next = i + 1;
     cans[i].ts = 0;
-    if (i = canCapacity - 1) {
+    if (i == canCapacity - 1) {
       cans[i].next = -1;
     }
   }
@@ -195,114 +175,151 @@ void setup() {
   RobotBase.setNavThresh(2, 0.035);
   RobotBase.setOdomPeriod(10);
   RobotBase.setNavPeriod(10);
+  RobotBase.setIRPeriod(10);
 
 
   Serial.begin(115200);
   //  Serial1.begin(9600);
   lcdInit();
   servoG.attach(SERVO_G);  // init gripper servo
-  servoG.write(SERVO_G_OPEN);  
-
-  RobotBase.driveTo(200, 0);
+  servoG.write(SERVO_G_OPEN);
   RobotBase.time();
 }
 
 void loop() {
-
-  while (!goBot) {
-    irAction.check();
-    debugIrAction.check();
-    uint8_t buttons = lcd.readButtons();
-    if (buttons && BUTTON_UP) {
-      lcd.clear();
-      lcd.setBacklight(GREEN);
-      goBot = !goBot;  // stop everything if any button is pressed
-      delay(500);
-    }
-  }
-
-  irAction.check();
-  chooseCanAction.check();
-#if DEBUG_IR
-  debugIrAction.check();
-#endif
-
   RobotBase.update();
 
-  newState = (mode != lastMode);
+  if (mode != mWaitStart) {
+    chooseCanAction.check();
+  }
+
+  newState = (lastMode != mode) || restart;
+  restart = false;
+
+  lastMode = mode;
 
   switch (mode) {
-  case mWander:
-    if (RobotBase.navDone()) {
-      mode = mStop;
-    } 
-    else if (targetCan != -1) {
-      RobotBase.setMax(20, 2.0); //cm/s, Rad/s
-      RobotBase.turnTo(cans[targetCan].pos.x, cans[targetCan].pos.y);
-      mode = mTurnCan;
+  case mWaitStart:
+    buttons = lcd.readButtons();
+    if (buttons & BUTTON_UP) {
+      lcd.clear();
+      lcd.setBacklight(GREEN);
+      mode = mWait1Sec;
+      nextMode = mWander;
     }
     break;
 
-  case mTurnCan:
-    if (RobotBase.navDone()) {
-      RobotBase.driveTo(cans[targetCan].pos.x, cans[targetCan].pos.y);
-      mode = mDriveCan;
+  case mWait1Sec:
+    if (newState) {
+      targetTime = millis() + 1000;
+    }
+
+    if (millis() >= targetTime) {
+      mode = nextMode;
+    };
+    break;
+
+  case mWander:
+    if (newState) {
+      int destX;
+
+      if (atGoal) destX = 0;
+      else destX = 180;
+
+      RobotBase.driveTo(destX, 0);
+    } 
+    else {
+      if (targetCan != -1) {
+        mode = mDriveCan;
+      } 
+      else if (RobotBase.navDone()) {
+        atGoal = !atGoal;
+        restart = true;
+      }
     }
     break;
 
   case mDriveCan:
-    if (RobotBase.navDone()) {
+    if (newState) {
+      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y);
+    } 
+    else if (RobotBase.navDone()) {
       mode = mGrabCan;
     }
     break;
 
   case mGrabCan:
-    if (RobotBase.navDone()) {
-      for ( i = SERVO_G_OPEN; i > SERVO_G_CLOSE; --i) {
-        servoG.write(i);
-        delay(20);
-      }
-      RobotBase.turnTo(MAX_X, 0);
-      mode = mTurnGoal;
+    if (newState) {
+      lastGrip = millis();
+      curGrip = SERVO_G_OPEN;
     }
-    break;
 
-  case mTurnGoal:
-    if (RobotBase.navDone()) {
-      RobotBase.setMax(60, 2.0); //cm/s, Rad/s
-      RobotBase.driveTo(GOAL_X, GOAL_Y);
-      mode = mDriveGoal;
+    if (millis() - lastGrip >= gripDelay) {
+      curGrip -= gripStep;
+      if (curGrip <= SERVO_G_CLOSE) {
+        curGrip = SERVO_G_CLOSE;
+        mode = mDriveGoal;
+      }
+
+      lastGrip = millis();
+
+      servoG.write(curGrip);
     }
     break;
 
   case mDriveGoal:
-    if (RobotBase.navDone()) {
-
+    if (newState) {
+      RobotBase.turnToAndDrive(MAX_X, 0);
+    } 
+    else if (RobotBase.navDone()) {
       mode = mDropCan;
     }
     break;
 
   case mDropCan:
-    if (RobotBase.navDone()) {
-      for ( i = SERVO_G_CLOSE; i < SERVO_G_OPEN; ++i) {
-        servoG.write(i);
-        delay(20);
+    if (newState) {
+      lastGrip = millis();
+      curGrip = SERVO_G_CLOSE;
+    }
+
+    if (millis() - lastGrip >= gripDelay) {
+      curGrip += gripStep;
+
+      if (curGrip >= SERVO_G_OPEN) {
+        curGrip = SERVO_G_OPEN;
+        mode = mBackup;
+        atGoal = true;
       }
-      RobotBase.driveTo(0, MAX_Y / 2.0);
+
+      lastGrip = millis();
+
+      servoG.write(curGrip);
+    }
+    break;
+
+  case mBackup:
+    if (newState) {
+      RobotBase.setVelocityAndTurn(-20.0, 0.0);
+      targetTime = millis() + 2000;
+    }
+
+    if (millis() >= targetTime) {
+      RobotBase.stop();
       mode = mWander;
     }
+
     break;
 
   case mStop:
     RobotBase.stop();
     break;
-  }  
+  }
 }
 
 #define OBJ_MIN_WIDTH 3
 #define OBJ_MAX_WIDTH 14
 
-void detectCan(int sensor, float lastDist, float curDist) {
+void detectCan(int sensor, int curDist, int diff) {
   float objX, objY;
   static int objDistThresh = 5;
   static int objTimeThresh = 300;
@@ -315,7 +332,7 @@ void detectCan(int sensor, float lastDist, float curDist) {
       Serial.print("Dist: ");
       Serial.println(curDist);
 
-      if (lastDist - curDist > objDistThresh) {  // we found something
+      if (diff > objDistThresh) {  // we found something
         obj[sensor].start.x = objX;
         obj[sensor].start.y = objY;
         obj[sensor].active = true;
@@ -328,7 +345,7 @@ void detectCan(int sensor, float lastDist, float curDist) {
         Serial.println(millis());
         Serial.println("");
       } 
-      else if (obj[sensor].active && fabs(curDist - lastDist) > objDistThresh) {
+      else if (obj[sensor].active && fabs(diff) > objDistThresh) {
         obj[sensor].last.x = objX;
         obj[sensor].last.y = objY;          
         double dX = obj[sensor].start.x - obj[sensor].last.x;
@@ -347,7 +364,7 @@ void detectCan(int sensor, float lastDist, float curDist) {
       }
       else if (obj[sensor].active ) {
         obj[sensor].last.x = objX;
-        obj[sensor].last.y = objY;          
+        obj[sensor].last.y = objY;
       }
     }
   }  
@@ -367,74 +384,50 @@ void chooseCan() {
   if (targetCan == -1) {
     for (int i = 0; i < canCapacity; i++) {
       if (cans[i].ts != 0) {
-         if (firstCan) {
-           float dX = cans[i].pos.x - RobotBase.getX();
-           float dY = cans[i].pos.y - RobotBase.getY();
-           float _dist = hypot(dX,dY);
-           if (_dist < dist) {
-             dist = _dist;
-             targetCan = i;
-           }
-         }
-         else {
-           if (cans[i].distToGoal < dist) {
-             dist = cans[i].distToGoal;
-             targetCan = i;
-           }
-         }
+        if (firstCan) {
+          float dX = cans[i].pos.x - RobotBase.getX();
+          float dY = cans[i].pos.y - RobotBase.getY();
+          float _dist = hypot(dX,dY);
+          if (_dist < dist) {
+            dist = _dist;
+            targetCan = i;
+          }
+        }
+        else {
+          if (cans[i].distToGoal < dist) {
+            dist = cans[i].distToGoal;
+            targetCan = i;
+          }
+        }
       }
     }
     firstCan = false;
   }
 }
 void readIrSensors() {
-
-  float lastLDist, lastFLDist, lastFDist, lastFRDist, lastRDist;
-
-  lastLDist = irLDist;
-  irLDist  = irL.distance();
-  detectCan(IRL,lastLDist,irLDist);
-
-  lastFLDist = irFLDist;
-  irFLDist = irFL.distance();
-  detectCan(IRFL,lastFLDist,irFLDist);
-
-  lastFDist = irFDist;
-  irFDist  = irF.distance();
-  detectCan(IRF,lastFDist,irFDist);
-
-  lastFRDist = irFRDist;
-  irFRDist = irFR.distance();
-  detectCan(IRFR,lastFRDist,irFRDist);
-
-  lastRDist = irRDist;
-  irRDist  = irR.distance();
-  detectCan(IRR,lastRDist,irRDist);
-
+  for (int i = 0; i < IR_END; ++i) {
+    detectCan(i, RobotBase.irDistance((IR_Index)i), RobotBase.irDiff((IR_Index)i));
+  }
 }
 
 void addCan(float x, float y) {
-  int _thisCan = nextCan;
   double dX = GOAL_X - x;
   double dY = GOAL_Y - y;
   double distToGoal = hypot(dX,dY);
-  
-  cans[_thisCan].ts = millis();  
-  cans[_thisCan].pos.x = x;
-  cans[_thisCan].pos.y = y;
-  cans[_thisCan].distToGoal = distToGoal;
-  nextCan = cans[_thisCan].next;
+
+  cans[nextCan].ts = millis();  
+  cans[nextCan].pos.x = x;
+  cans[nextCan].pos.y = y;
+  cans[nextCan].distToGoal = distToGoal;
+  nextCan = cans[nextCan].next;
   if (nextCan == -1) {  // our can capacity is full clear out an old one
     // ToDo: write a function that searches for oldest timestamp
   }
 }
 
 void removeCan(int canIndex) {
-  cans[canIndex].ts = 0;
-  cans[canIndex].pos.x = 0;
-  cans[canIndex].pos.y = 0;
-  cans[canIndex].distToGoal = 0;
-  cans[canIndex].next = nextCan;  
+  cans[canIndex].next = nextCan;
+  nextCan = canIndex;
 }
 
 void lcdInit() {
@@ -449,16 +442,16 @@ void debugIr() {
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("   ");
-  lcd.print(irFLDist);
+  lcd.print(RobotBase.irDistance(IRFL));
   lcd.print("  ");
-  lcd.print(irFDist);
+  lcd.print(RobotBase.irDistance(IRF));
   lcd.print("  ");
-  lcd.print(irFRDist);
+  lcd.print(RobotBase.irDistance(IRFR));
 
   lcd.setCursor(0,1);
-  lcd.print(irLDist);
+  lcd.print(RobotBase.irDistance(IRL));
   lcd.print(" <--  --> ");
-  lcd.print(irRDist);
+  lcd.print(RobotBase.irDistance(IRR));
 #endif
 #if DEBUG_USE_SERIAL
   Serial.print("Left       : ");
@@ -473,6 +466,7 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
 
 
 
