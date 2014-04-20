@@ -52,16 +52,14 @@ struct ObjInfo {
   Point start;
   Point last;
   double width;
-  long ts;  // timestamp
   bool active;
 };
 
 ObjInfo obj[IR_END];
 
-
-
 TimedAction irAction = TimedAction(20,readIrSensors);  // Scan IR Sensors every 800ms
 TimedAction debugIrAction = TimedAction(1000,debugIr);
+TimedAction chooseCanAction = TimedAction(1000,chooseCan);
 
 LiquidTWI2 lcd(0);
 
@@ -121,9 +119,9 @@ LiquidTWI2 lcd(0);
 #define MAX_Y 61 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
 #define MIN_X 0 - ROBOT_FRONT_OFFSET + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
 #define MIN_Y -61 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
+#define GOAL_X MAX_X
+#define GOAL_Y 0
 #endif
-
-int grid[17568][2];
 
 typedef enum {
   mWander,
@@ -139,27 +137,18 @@ Mode;
 
 Mode mode = mWander, lastMode = mode;
 // x, y positions of cans
-double canPts[6][2] = {
-  {
-    0,0                    }
-  ,
-  {
-    0,0                    }
-  ,
-  {
-    0,0                    }
-  ,
-  {
-    0,0                    }
-  ,
-  {
-    0,0                    }
-  ,
-  {
-    0,0                    }  
-};
 
-int canCnt = 0;
+struct canInfo {
+  unsigned long ts;  // timestamp
+  Point pos;
+  double distToGoal;
+  int next;
+};
+const int canCapacity = 20;
+canInfo cans[canCapacity];
+int targetCan = -1;  // index for cans[]
+int nextCan;
+bool firstCan = true;  // flag used for fist can we search for
 
 bool left = false;
 
@@ -169,7 +158,17 @@ bool newState = true;
 
 void setup() {
 
-  obj[IRFL].active = false;
+  for (int i = 0; i < IR_END; i++) {
+    obj[i].active = false;
+  }
+  
+  for (int i = 0; i < canCapacity; i++) {
+    cans[i].next = i + 1;
+    cans[i].ts = 0;
+    if (i = canCapacity - 1) {
+      cans[i].next = -1;
+    }
+  }
 
   //Establish PID gains
   RobotBase.setPID(10, 4, 0);
@@ -223,12 +222,13 @@ void loop() {
   }
 
   irAction.check();
+  chooseCanAction.check();
 #if DEBUG_IR
   debugIrAction.check();
 #endif
 
   RobotBase.update();
-  
+
   newState = (mode != lastMode);
 
   switch (mode) {
@@ -236,16 +236,16 @@ void loop() {
     if (RobotBase.navDone()) {
       mode = mStop;
     } 
-    else if (canPts[0][0] != 0) {
+    else if (targetCan != -1) {
       RobotBase.setMax(20, 2.0); //cm/s, Rad/s
-      RobotBase.turnTo(canPts[0][0], canPts[0][1]);
+      RobotBase.turnTo(cans[targetCan].pos.x, cans[targetCan].pos.y);
       mode = mTurnCan;
     }
     break;
 
   case mTurnCan:
     if (RobotBase.navDone()) {
-      RobotBase.driveTo(canPts[0][0], canPts[0][1]);
+      RobotBase.driveTo(cans[targetCan].pos.x, cans[targetCan].pos.y);
       mode = mDriveCan;
     }
     break;
@@ -270,7 +270,7 @@ void loop() {
   case mTurnGoal:
     if (RobotBase.navDone()) {
       RobotBase.setMax(60, 2.0); //cm/s, Rad/s
-      RobotBase.driveTo(MAX_X, 0);
+      RobotBase.driveTo(GOAL_X, GOAL_Y);
       mode = mDriveGoal;
     }
     break;
@@ -299,7 +299,6 @@ void loop() {
   }  
 }
 
-
 #define OBJ_MIN_WIDTH 3
 #define OBJ_MAX_WIDTH 14
 
@@ -320,7 +319,6 @@ void detectCan(int sensor, float lastDist, float curDist) {
         obj[sensor].start.x = objX;
         obj[sensor].start.y = objY;
         obj[sensor].active = true;
-        obj[sensor].ts = millis();
         Serial.println("");
         Serial.println("!! START !!");
         Serial.print("Pos: ");
@@ -340,9 +338,9 @@ void detectCan(int sensor, float lastDist, float curDist) {
         Serial.println(obj[sensor].width);
         if (obj[sensor].width > OBJ_MIN_WIDTH && obj[sensor].width < OBJ_MAX_WIDTH) {  // I think it's a can
           Serial.println("$$ FOUND CAN $$");
-          canPts[canCnt][0] = (obj[sensor].start.x + obj[sensor].last.x) / 2;
-          canPts[canCnt][1] = (obj[sensor].start.y + obj[sensor].last.y) / 2;
-          ++canCnt;           
+          float posX = (obj[sensor].start.x + obj[sensor].last.x) / 2;
+          float posY = (obj[sensor].start.y + obj[sensor].last.y) / 2;
+          addCan(posX,posY);
         }
         resetCanDetection(sensor);
         Serial.println("## RESET ##");
@@ -364,38 +362,79 @@ void resetCanDetection(int sensor) {
   obj[sensor].active = false;
 }
 
+void chooseCan() {
+  float dist = 1000;
+  if (targetCan == -1) {
+    for (int i = 0; i < canCapacity; i++) {
+      if (cans[i].ts != 0) {
+         if (firstCan) {
+           float dX = cans[i].pos.x - RobotBase.getX();
+           float dY = cans[i].pos.y - RobotBase.getY();
+           float _dist = hypot(dX,dY);
+           if (_dist < dist) {
+             dist = _dist;
+             targetCan = i;
+           }
+         }
+         else {
+           if (cans[i].distToGoal < dist) {
+             dist = cans[i].distToGoal;
+             targetCan = i;
+           }
+         }
+      }
+    }
+    firstCan = false;
+  }
+}
 void readIrSensors() {
 
-  //  long irStart = millis();
   float lastLDist, lastFLDist, lastFDist, lastFRDist, lastRDist;
 
-  //  lastLDist = irLDist;
-  //  irLDist  = irL.distance();
-  //  detectCan(IRL,lastLDist,irLDist);
+  lastLDist = irLDist;
+  irLDist  = irL.distance();
+  detectCan(IRL,lastLDist,irLDist);
 
   lastFLDist = irFLDist;
   irFLDist = irFL.distance();
-  
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(irFLDist);
-  
   detectCan(IRFL,lastFLDist,irFLDist);
-  /*
-  lastFDist = irFDist;
-   irFDist  = irF.distance();
-   detectCan(IRF,lastFDist,irFDist);
-   
-   lastFRDist = irFRDist;
-   irFRDist = irFR.distance();
-   detectCan(IRFR,lastFRDist,irFRDist);
-   
-   lastRDist = irRDist;
-   irRDist  = irR.distance();
-   detectCan(IRR,lastRDist,irRDist);
-   */
 
-  //  Serial.println(millis() - irStart);
+  lastFDist = irFDist;
+  irFDist  = irF.distance();
+  detectCan(IRF,lastFDist,irFDist);
+
+  lastFRDist = irFRDist;
+  irFRDist = irFR.distance();
+  detectCan(IRFR,lastFRDist,irFRDist);
+
+  lastRDist = irRDist;
+  irRDist  = irR.distance();
+  detectCan(IRR,lastRDist,irRDist);
+
+}
+
+void addCan(float x, float y) {
+  int _thisCan = nextCan;
+  double dX = GOAL_X - x;
+  double dY = GOAL_Y - y;
+  double distToGoal = hypot(dX,dY);
+  
+  cans[_thisCan].ts = millis();  
+  cans[_thisCan].pos.x = x;
+  cans[_thisCan].pos.y = y;
+  cans[_thisCan].distToGoal = distToGoal;
+  nextCan = cans[_thisCan].next;
+  if (nextCan == -1) {  // our can capacity is full clear out an old one
+    // ToDo: write a function that searches for oldest timestamp
+  }
+}
+
+void removeCan(int canIndex) {
+  cans[canIndex].ts = 0;
+  cans[canIndex].pos.x = 0;
+  cans[canIndex].pos.y = 0;
+  cans[canIndex].distToGoal = 0;
+  cans[canIndex].next = nextCan;  
 }
 
 void lcdInit() {
@@ -434,6 +473,8 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
+
 
 
 
