@@ -223,7 +223,7 @@ int CRobotBase::irDistance(IR_Index ir) {
 }
 
 int CRobotBase::irDiff(IR_Index ir) {
-	return _irDiff[ir];
+	return _irDist[ir] - _irPrevDist[ir];
 }
 
 void CRobotBase::update() {
@@ -344,8 +344,7 @@ int CRobotBase::readIR(IR_Index ir) {
         break;
     }
     
-    _irDist[ir] = (puntualDistance * _irFact) + (_irPrevDist[ir] * (1.0 - _irFact));
-    _irDiff[ir] = _irDist[ir] - _irPrevDist[ir];
+    _irDist[ir] = (puntualDistance * _irFact) + _irPrevDist[ir] * (1.0 - _irFact);
     _irPrevDist[ir] = _irDist[ir];
     
     return puntualDistance;

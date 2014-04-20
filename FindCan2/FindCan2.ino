@@ -26,7 +26,6 @@ struct ObjInfo {
   Point last;
   double width;
   bool active;
-  int curDist;
   int lastDist;
 };
 
@@ -189,10 +188,10 @@ void setup() {
 
 void loop() {
   RobotBase.update();
-  irAction.check();
 
   if (mode != mWaitStart) {
     chooseCanAction.check();
+    irAction.check();
   }
 
   newState = (lastMode != mode) || restart;
@@ -255,6 +254,7 @@ void loop() {
     if (newState) {
       lastGrip = millis();
       curGrip = SERVO_G_OPEN;
+      RobotBase.stop();
     }
 
     if (millis() - lastGrip >= gripDelay) {
@@ -283,6 +283,7 @@ void loop() {
     if (newState) {
       lastGrip = millis();
       curGrip = SERVO_G_CLOSE;
+      RobotBase.stop();
     }
 
     if (millis() - lastGrip >= gripDelay) {
@@ -322,11 +323,21 @@ void loop() {
 #define OBJ_MIN_WIDTH 3
 #define OBJ_MAX_WIDTH 14
 
-void detectCan(int sensor, int curDist, int diff) {
+void detectCan(int sensor, int curDist) {
   float objX, objY;
   static int objDistThresh = 5;
+  int diff = curDist - obj[sensor].lastDist;
+  obj[sensor].lastDist = curDist;
 
-  if (curDist > 10 && curDist < 80) {  // ignore values outside the sensors specs
+  int min = 10;
+  int max = 80;
+
+  if (sensor == 0 || sensor == 4) {
+    min = 20;
+    max = 150;
+  }
+
+  if (curDist > min && curDist < max) {  // ignore values outside the sensors specs
     // calculate detected object x,y position
     objX = curDist * (0.573576436) + RobotBase.getX();
     objY = curDist * (0.819152044) + RobotBase.getY();
@@ -412,7 +423,7 @@ void chooseCan() {
 }
 void readIrSensors() {
   for (int i = 0; i < IR_END; ++i) {
-    detectCan(i, RobotBase.irDistance((IR_Index)i), RobotBase.irDiff((IR_Index)i));
+    detectCan(i, RobotBase.irDistance((IR_Index)i));
   }
 }
 
@@ -472,6 +483,7 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
 
 
 
