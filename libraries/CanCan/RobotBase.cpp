@@ -344,7 +344,8 @@ int CRobotBase::readIR(IR_Index ir) {
         break;
     }
     
-    _irDist[ir] = puntualDistance * _irFact + _irPrevDist[ir] * (1.0 - _irFact);
+    _irDist[ir] = (puntualDistance * _irFact) + (_irPrevDist[ir] * (1.0 - _irFact));
+    _irPrevDist[ir] = puntualDistance;
     
     return puntualDistance;
 }
