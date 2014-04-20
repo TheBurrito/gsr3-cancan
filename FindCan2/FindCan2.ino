@@ -12,8 +12,8 @@
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
 
-int irSamples = 1;
-int irThresh = 0;
+int irSamples = 10;
+int irThresh = 90;
 // (Sensor Pin, No. Samples, % Range Threshold, Model)
 SharpIR irL(IR_L, irSamples, irThresh, 20150);
 SharpIR irFL(IR_FL, irSamples, irThresh, 1080);
@@ -50,14 +50,14 @@ struct Point {
 
 struct ObjInfo {
   Point start;
-  Point mid;
+  Point last;
   double width;
-
-  int lastDist;
+  long ts;  // timestamp
   bool active;
 };
 
 ObjInfo obj[IR_END];
+
 
 
 TimedAction irAction = TimedAction(20,readIrSensors);  // Scan IR Sensors every 800ms
@@ -75,6 +75,25 @@ LiquidTWI2 lcd(0);
 #define TEAL 0x6
 #define WHITE 0x7
 
+// Distances from robot center to outer dimensions
+#define ROBOT_GRIP_OFFSET 8.7  // gripper closed position
+#define ROBOT_FRONT_OFFSET 7.3 // to front of case
+#define ROBOT_REAR_OFFSET 10.7 // to rear of case
+#define ROBOT_WHEEL_OFFSET 9.2 // to outside of wheel
+
+// Sensor offsets from robot center
+#define IR_L_OFFSET_X 0
+#define IR_L_OFFSET_Y -8.0
+#define IR_FL_OFFSET_X 4.1
+#define IR_FL_OFFSET_Y -6.2
+#define IR_F_OFFSET_X 7.3
+#define IR_F_OFFSET_Y -1.2
+#define IR_FR_OFFSET_X 5.7
+#define IR_FR_OFFSET_Y 4.8
+#define IR_L_OFFSET_X 0
+#define IR_L_OFFSET_Y 8.1
+
+#define WALL_BUFFER 10 // padding around walls to exclude from object detection
 /*
   There are three known arena sizes
  1 - official arena size 7'x12'
@@ -98,41 +117,13 @@ LiquidTWI2 lcd(0);
 #endif
 
 #if ARENA == 3
-#define MAX_X 200  
-#define MAX_Y 40
-#define MIN_X -40
-#define MIN_Y 0
+#define MAX_X 244 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET - 13
+#define MAX_Y 61 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
+#define MIN_X 0 - ROBOT_FRONT_OFFSET + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
+#define MIN_Y -61 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
 #endif
 
-// x, y positions of cans
-double canPts[6][2] = {
-  {
-    0,0        }
-  ,
-  {
-    0,0        }
-  ,
-  {
-    0,0        }
-  ,
-  {
-    0,0        }
-  ,
-  {
-    0,0        }
-  ,
-  {
-    0,0        }  
-};
-double FLPts[2][2] = {
-  {
-    0,0        }
-  ,
-  {
-    0,0        }  
-};
-
-int canCnt = 0;
+int grid[17568][2];
 
 typedef enum {
   mWander,
@@ -147,6 +138,28 @@ typedef enum {
 Mode;
 
 Mode mode = mWander;
+// x, y positions of cans
+double canPts[6][2] = {
+  {
+    0,0                  }
+  ,
+  {
+    0,0                  }
+  ,
+  {
+    0,0                  }
+  ,
+  {
+    0,0                  }
+  ,
+  {
+    0,0                  }
+  ,
+  {
+    0,0                  }  
+};
+
+int canCnt = 0;
 
 bool left = false;
 
@@ -154,6 +167,8 @@ bool goBot = false;  // used to wait for keypad press to start
 
 void setup() {
 
+  obj[IRFL].active = false;
+  
   //Establish PID gains
   RobotBase.setPID(10, 4, 0);
 
@@ -280,121 +295,79 @@ void loop() {
   }  
 }
 
-void detectCan1(int sensor, float lastDist, float curDist) {
-  float objX, objY;
-  int objDistThresh = 15;
-  int objMinWidth = 1;
-  int objMaxWidth = 14;
-
-  if (irFLDist > 10 && irFLDist < 80) {  // ignore values outside the sensors specs
-    // calculate detected object x,y position
-    objX = irFLDist * (0.573576436) + RobotBase.getX();
-    objY = irFLDist * (0.819152044) + RobotBase.getY();
-    Serial.print("Dist: ");
-    Serial.println(curDist);
-
-    if (lastDist - curDist > objDistThresh) {  // we found something
-      FLPts[0][0] = objX;
-      FLPts[0][1] = objY;
-      FLPts[1][0] = objX;
-      FLPts[1][1] = objY;
-      left = true;
-      Serial.println("!! START !!");
-      Serial.print("Pos: ");
-      Serial.print(int(objX));
-      Serial.print(",");
-      Serial.println(int(objY));
-    } 
-    else if (left && fabs(curDist - lastDist) > objDistThresh) {
-      Serial.println("-- STOP --");
-      left = false;
-      double dX = FLPts[0][0] - FLPts[1][0], dY = FLPts[0][1] - FLPts[1][1];
-      double width = hypot(dX, dY);
-      Serial.print("width: ");
-      Serial.println(width);
-
-      if (width > objMinWidth && width < objMaxWidth){  // I think it's a can
-        Serial.println("$$ FOUND CAN $$");
-        canPts[canCnt][0] = (FLPts[0][0] + FLPts[1][0]) / 2;
-        canPts[canCnt][1] = (FLPts[0][1] + FLPts[1][1]) / 2;
-        FLPts[0][0] = 0;
-        FLPts[0][1] = 0;
-        FLPts[1][0] = 0;
-        FLPts[1][1] = 0;
-        ++canCnt;
-      }
-    } 
-    else if (left) {
-      FLPts[1][0] = objX;
-      FLPts[1][1] = objY;
-    }
-
-
-  }  
-}
 
 #define OBJ_MIN_WIDTH 3
 #define OBJ_MAX_WIDTH 14
 
 void detectCan(int sensor, float lastDist, float curDist) {
   float objX, objY;
-  int objDistThresh = 15;
+  static int objDistThresh = 15;
+  static int objTimeThresh = 300;
 
-  if (irFLDist > 10 && irFLDist < 80) {  // ignore values outside the sensors specs
+  if (curDist > 10 && curDist < 80) {  // ignore values outside the sensors specs
     // calculate detected object x,y position
-    objX = irFLDist * (0.573576436) + RobotBase.getX();
-    objY = irFLDist * (0.819152044) + RobotBase.getY();
-    Serial.print("Dist: ");
-    Serial.println(curDist);
+    objX = curDist * (0.573576436) + RobotBase.getX();
+    objY = curDist * (0.819152044) + RobotBase.getY();
+    if (objX < MAX_X && objX > MIN_X && objY < MAX_Y && objY > MIN_Y) {
+        Serial.print("Dist: ");
+        Serial.println(curDist);
 
-    if (lastDist - curDist > objDistThresh) {  // we found something
-      FLPts[0][0] = objX;
-      FLPts[0][1] = objY;
-      FLPts[1][0] = objX;
-      FLPts[1][1] = objY;
-      left = true;
-      Serial.println("!! START !!");
-      Serial.print("Pos: ");
-      Serial.print(int(objX));
-      Serial.print(",");
-      Serial.println(int(objY));
-    } 
-    else if (left && fabs(curDist - lastDist) > objDistThresh) {
-      Serial.println("-- STOP --");
-      left = false;
-      double dX = FLPts[0][0] - FLPts[1][0], dY = FLPts[0][1] - FLPts[1][1];
-      double width = hypot(dX, dY);
-      Serial.print("width: ");
-      Serial.println(width);
-
-      if (width > OBJ_MIN_WIDTH && width < OBJ_MAX_WIDTH){  // I think it's a can
-        Serial.println("$$ FOUND CAN $$");
-        canPts[canCnt][0] = (FLPts[0][0] + FLPts[1][0]) / 2;
-        canPts[canCnt][1] = (FLPts[0][1] + FLPts[1][1]) / 2;
-        FLPts[0][0] = 0;
-        FLPts[0][1] = 0;
-        FLPts[1][0] = 0;
-        FLPts[1][1] = 0;
-        ++canCnt;
+      if (lastDist - curDist > objDistThresh) {  // we found something
+        obj[sensor].start.x = objX;
+        obj[sensor].start.y = objY;
+        obj[sensor].active = true;
+        obj[sensor].ts = millis();
+        Serial.println("");
+        Serial.println("!! START !!");
+        Serial.print("Pos: ");
+        Serial.print(int(objX));
+        Serial.print(",");
+        Serial.println(int(objY));
+        Serial.println(millis());
+        Serial.println("");
+      } 
+      else if (obj[sensor].active && fabs(curDist - lastDist) > objDistThresh) {
+          obj[sensor].last.x = objX;
+          obj[sensor].last.y = objY;          
+          double dX = obj[sensor].start.x - obj[sensor].last.x;
+          double dY = obj[sensor].start.y - obj[sensor].last.y;
+          obj[sensor].width = hypot(dX, dY);
+          Serial.print("width: ");
+          Serial.println(obj[sensor].width);
+          if (obj[sensor].width > OBJ_MIN_WIDTH && obj[sensor].width < OBJ_MAX_WIDTH) {  // I think it's a can
+            Serial.println("$$ FOUND CAN $$");
+            canPts[canCnt][0] = (obj[sensor].start.x + obj[sensor].last.x) / 2;
+            canPts[canCnt][1] = (obj[sensor].start.y + obj[sensor].last.y) / 2;
+            ++canCnt;           
+          }
+          resetCanDetection(sensor);
+          Serial.println("## RESET ##");
       }
-    } 
-    else if (left) {
-      FLPts[1][0] = objX;
-      FLPts[1][1] = objY;
+      else if (obj[sensor].active ) {
+          obj[sensor].last.x = objX;
+          obj[sensor].last.y = objY;          
+      }
     }
-
-
   }  
+}
+
+void resetCanDetection(int sensor) {
+  obj[sensor].start.x = 0;
+  obj[sensor].start.y = 0;
+  obj[sensor].last.x = 0;
+  obj[sensor].last.y = 0;
+  obj[sensor].width = 0;  
+  obj[sensor].active = false;
 }
 
 void readIrSensors() {
 
-  long irStart = millis();
+  //  long irStart = millis();
   float lastLDist, lastFLDist, lastFDist, lastFRDist, lastRDist;
 
   //  lastLDist = irLDist;
   //  irLDist  = irL.distance();
-  //  detectCan(IRL,lastFLDist,irFLDist);
+  //  detectCan(IRL,lastLDist,irLDist);
 
   lastFLDist = irFLDist;
   irFLDist = irFL.distance();
@@ -402,15 +375,15 @@ void readIrSensors() {
   /*
   lastFDist = irFDist;
    irFDist  = irF.distance();
-   detectCan(IRF,lastFLDist,irFLDist);
+   detectCan(IRF,lastFDist,irFDist);
    
    lastFRDist = irFRDist;
    irFRDist = irFR.distance();
-   detectCan(IRFR,lastFLDist,irFLDist);
+   detectCan(IRFR,lastFRDist,irFRDist);
    
    lastRDist = irRDist;
    irRDist  = irR.distance();
-   detectCan(IRR,lastFLDist,irFLDist);
+   detectCan(IRR,lastRDist,irRDist);
    */
 
   //  Serial.println(millis() - irStart);
@@ -452,6 +425,11 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
+
+
+
+
 
 
 
