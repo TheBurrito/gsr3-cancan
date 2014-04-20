@@ -102,29 +102,13 @@ int SharpIR::cm() {
 
 int SharpIR::distance() {
 
-    _p=0;
     _sum=0;
-
     
     for (int i=0; i<_avg; i++){
-        
-        int foo=cm();
-        
-        if (foo>=(_tol*_previousDistance)){
-        
-            _previousDistance=foo;
-            _sum=_sum+foo;
-            _p++;
-            
-        }
-        
-        
+        _sum += cm();
     }
-
     
-    int accurateDistance=_sum/_p;
-    
-    return accurateDistance;
+    return (_sum / _avg);
 
 }
 
