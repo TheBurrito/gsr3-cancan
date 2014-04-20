@@ -126,6 +126,7 @@ private:
 	
 	int _irDist[IR_END];
 	int _irPrevDist[IR_END];
+	int _irDiff[IR_END];
 	
 	double _irFact;
 	
