@@ -63,8 +63,8 @@ LiquidTWI2 lcd(0);
 #define IR_F_OFFSET_Y -1.2
 #define IR_FR_OFFSET_X 5.7
 #define IR_FR_OFFSET_Y 4.8
-#define IR_L_OFFSET_X 0
-#define IR_L_OFFSET_Y 8.1
+#define IR_R_OFFSET_X 0
+#define IR_R_OFFSET_Y 8.0
 
 #define WALL_BUFFER 10 // padding around walls to exclude from object detection
 /*
@@ -111,7 +111,7 @@ typedef enum {
 } 
 Mode;
 
-Mode mode = mWander, lastMode = mode, nextMode;
+Mode mode = mWaitStart, lastMode = mode, nextMode;
 
 bool newState = true, restart = false;
 
@@ -176,6 +176,7 @@ void setup() {
   RobotBase.setOdomPeriod(10);
   RobotBase.setNavPeriod(10);
   RobotBase.setIRPeriod(10);
+  RobotBase.setIRFilter(0.7);
 
 
   Serial.begin(115200);
@@ -188,6 +189,7 @@ void setup() {
 
 void loop() {
   RobotBase.update();
+  irAction.check();
 
   if (mode != mWaitStart) {
     chooseCanAction.check();
@@ -200,6 +202,7 @@ void loop() {
 
   switch (mode) {
   case mWaitStart:
+    debugIrAction.check();
     buttons = lcd.readButtons();
     if (buttons & BUTTON_UP) {
       lcd.clear();
@@ -322,17 +325,20 @@ void loop() {
 void detectCan(int sensor, int curDist, int diff) {
   float objX, objY;
   static int objDistThresh = 5;
-  static int objTimeThresh = 300;
 
   if (curDist > 10 && curDist < 80) {  // ignore values outside the sensors specs
     // calculate detected object x,y position
     objX = curDist * (0.573576436) + RobotBase.getX();
     objY = curDist * (0.819152044) + RobotBase.getY();
     if (objX < MAX_X && objX > MIN_X && objY < MAX_Y && objY > MIN_Y) {
-      Serial.print("Dist: ");
-      Serial.println(curDist);
+      Serial.print(sensor);
+      Serial.print(":");
+      Serial.print(curDist);
+      Serial.print(", ");
+      Serial.println(diff);
 
-      if (diff > objDistThresh) {  // we found something
+
+      if (diff < -objDistThresh) {  // we found something
         obj[sensor].start.x = objX;
         obj[sensor].start.y = objY;
         obj[sensor].active = true;
@@ -345,7 +351,7 @@ void detectCan(int sensor, int curDist, int diff) {
         Serial.println(millis());
         Serial.println("");
       } 
-      else if (obj[sensor].active && fabs(diff) > objDistThresh) {
+      else if (obj[sensor].active && diff > objDistThresh) {
         obj[sensor].last.x = objX;
         obj[sensor].last.y = objY;          
         double dX = obj[sensor].start.x - obj[sensor].last.x;
