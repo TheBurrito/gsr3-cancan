@@ -43,6 +43,7 @@ class SharpIR
     int _sum;
     int _previousDistance;
     int _tol;
+    int _cur;
     
 };
 

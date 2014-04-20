@@ -20,6 +20,7 @@ CRobotBase::CRobotBase() {
   
   _driving = false;
   _turning = false;
+  _turnFirst = false;
 }
 
 CRobotBase::~CRobotBase(){
@@ -233,8 +234,18 @@ void CRobotBase::update() {
 			}
 		}
 		
-		if (!_driving) dX = 0;
-		if (!_driving && !_turning) dTheta = 0;
+		if (!_driving) {
+			dX = 0;
+			
+			if (!_turning) {
+				dTheta = 0;
+				
+				if (_turnFirst) {
+					_driving = true;
+					_turnFirst = false;
+				}
+			}
+		}
 		
 		//Serial.print("N: ");
 		//Serial.print(dX);
@@ -269,46 +280,61 @@ void CRobotBase::setHeadingThresh(const double& thetaThresh) {
 	_thetaThresh = thetaThresh;
 }
 
-void CRobotBase::driveTo(const double x, const double& y) {
+void CRobotBase::driveTo(const double& x, const double& y) {
+	stop();
+	
 	_navX = x;
 	_navY = y;
 	
 	_driving = true;
-	_turning = false;
-	reset();
 }
 
-void CRobotBase::driveTo(const double x, const double& y, const double& theta) {
+void CRobotBase::driveTo(const double& x, const double& y, const double& theta) {
+	stop();
+	
 	_navX = x;
 	_navY = y;
 	_navTheta = theta;
 	
 	_driving = true;
 	_turning = true;
-	reset();
 }
 
 void CRobotBase::turnTo(const double& theta) {
+	stop();
+	
 	_navTheta = theta;
 	
-	_driving = false;
 	_turning = true;
-	reset();
 }
 
 void CRobotBase::turnTo(const double& x, const double& y) {
+	stop();
+	
 	double dX = x - _posX;
 	double dY = y - _posY;
 	_navTheta = atan2(dY, dX);
 	
-	_driving = false;
 	_turning = true;
-	reset();
+}
+
+void CRobotBase::turnToAndDrive(const double& x, const double& y) {
+	stop();
+	
+	double dX = x - _posX;
+	double dY = y - _posY;
+	_navTheta = atan2(dY, dX);
+	_navX = x;
+	_navY = y;
+	
+	_turning = true;
+	_turnFirst = true;
 }
 
 void CRobotBase::stop() {
 	_driving = false;
 	_turning = false;
+	_turnFirst = false;
 	reset();
 }
 

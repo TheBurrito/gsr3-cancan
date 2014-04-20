@@ -40,8 +40,10 @@ public:
 	void setPosThresh(const double& posThresh);
 	void setHeadingThresh(const double& thetaThresh);
 	
-	void driveTo(const double x, const double& y);
-	void driveTo(const double x, const double& y, const double& theta);
+	void driveTo(const double& x, const double& y);
+	void driveTo(const double& x, const double& y, const double& theta);
+	
+	void turnToAndDrive(const double& x, const double& y);
 	
 	void turnTo(const double& theta);
 	void turnTo(const double& x, const double& y);
@@ -76,6 +78,8 @@ private:
 	
 	double _navX, _navY, _navTheta;
 	double _navThresh, _thetaThresh;
+	
+	bool _turnFirst;
 	bool _driving;
 	bool _turning;
 	
