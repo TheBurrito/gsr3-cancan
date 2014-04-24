@@ -10,6 +10,7 @@
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
+#define DEBUG_DETECT_CAN false
 
 Servo servoG; // define the Gripper Servo
 #define SERVO_G_CLOSE 36
@@ -33,7 +34,7 @@ ObjInfo obj[IR_END];
 
 TimedAction irAction = TimedAction(20,readIrSensors);  // Scan IR Sensors every 800ms
 TimedAction debugIrAction = TimedAction(1000,debugIr);
-TimedAction chooseCanAction = TimedAction(1000,chooseCan);
+TimedAction chooseCanAction = TimedAction(200,chooseCan);
 
 LiquidTWI2 lcd(0);
 
@@ -53,18 +54,6 @@ LiquidTWI2 lcd(0);
 #define ROBOT_REAR_OFFSET 10.7 // to rear of case
 #define ROBOT_WHEEL_OFFSET 9.2 // to outside of wheel
 
-// Sensor offsets from robot center
-#define IR_L_OFFSET_X 0
-#define IR_L_OFFSET_Y -8.0
-#define IR_FL_OFFSET_X 4.1
-#define IR_FL_OFFSET_Y -6.2
-#define IR_F_OFFSET_X 7.3
-#define IR_F_OFFSET_Y -1.2
-#define IR_FR_OFFSET_X 5.7
-#define IR_FR_OFFSET_Y 4.8
-#define IR_R_OFFSET_X 0
-#define IR_R_OFFSET_Y 8.0
-
 #define WALL_BUFFER 10 // padding around walls to exclude from object detection
 /*
   There are three known arena sizes
@@ -74,25 +63,27 @@ LiquidTWI2 lcd(0);
  */
 #define ARENA 3
 
-#if ARENA == 1
-#define MAX_X 
-#define MAX_Y 
-#define MIN_X 
-#define MIN_Y 
-#endif
-
-#if ARENA == 2
-#define MAX_X 
-#define MAX_Y 
-#define MIN_X 
-#define MIN_Y 
-#endif
-
-#if ARENA == 3
-#define MAX_X 244 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET - 13
-#define MAX_Y 61 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
+#if ARENA == 1 // ft * in/ft * cm/in
+#define MAX_X 12 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
+#define MAX_Y 7 / 2 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
 #define MIN_X 0 - ROBOT_FRONT_OFFSET + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
-#define MIN_Y -61 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
+#define MIN_Y -7 / 2 * 12 * 2.54 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
+#define GOAL_X MAX_X
+#define GOAL_Y 0
+#endif
+
+#if ARENA == 2 // ft * in/ft * cm/in
+#define MAX_X 
+#define MAX_Y 
+#define MIN_X 
+#define MIN_Y 
+#endif
+
+#if ARENA == 3 // ft * in/ft * cm/in
+#define MAX_X 8 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
+#define MAX_Y 4 / 2 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
+#define MIN_X 20 - ROBOT_FRONT_OFFSET + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
+#define MIN_Y -4 / 2 * 12 * 2.54 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
 #define GOAL_X MAX_X
 #define GOAL_Y 0
 #endif
@@ -135,6 +126,17 @@ bool firstCan = true;  // flag used for fist can we search for
 
 uint8_t buttons;
 
+struct SensorInfo {
+  float angle;
+  Point offset;
+};
+SensorInfo sensors[IR_END];  
+
+// Bumper flags
+volatile int irbFR = LOW;
+volatile int irbF  = LOW;
+volatile int irbFL = LOW;
+
 void setup() {
 
   for (int i = 0; i < IR_END; i++) {
@@ -148,6 +150,23 @@ void setup() {
       cans[i].next = -1;
     }
   }
+
+  // Sensor offsets from robot center
+  sensors[IRL].offset.x = 0;
+  sensors[IRL].offset.y = -8.0;
+  sensors[IRL].angle = 90;
+  sensors[IRFL].offset.x = 4.1;
+  sensors[IRFL].offset.y = -6.2;
+  sensors[IRFL].angle = 55;  
+  sensors[IRF].offset.x = 7.3;
+  sensors[IRF].offset.y = -1.2;
+  sensors[IRF].angle = 0;
+  sensors[IRFR].offset.x = 5.7;
+  sensors[IRFR].offset.y = 4.8;
+  sensors[IRFR].angle = -35;
+  sensors[IRR].offset.x = 0;
+  sensors[IRR].offset.y = 8.0;
+  sensors[IRR].angle = -90;
 
   //Establish PID gains
   RobotBase.setPID(10, 4, 0);
@@ -181,6 +200,7 @@ void setup() {
   Serial.begin(115200);
   //  Serial1.begin(9600);
   lcdInit();
+  bumperInit();
   servoG.attach(SERVO_G);  // init gripper servo
   servoG.write(SERVO_G_OPEN);
   RobotBase.time();
@@ -222,6 +242,7 @@ void loop() {
     break;
 
   case mWander:
+    RobotBase.setMax(20, 2.0); //cm/s, Rad/s
     if (newState) {
       int destX;
 
@@ -243,6 +264,7 @@ void loop() {
 
   case mDriveCan:
     if (newState) {
+      RobotBase.setMax(30, 2.0); //cm/s, Rad/s
       RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y);
     } 
     else if (RobotBase.navDone()) {
@@ -254,14 +276,16 @@ void loop() {
     if (newState) {
       lastGrip = millis();
       curGrip = SERVO_G_OPEN;
-      RobotBase.stop();
+      RobotBase.stop();     
     }
 
     if (millis() - lastGrip >= gripDelay) {
       curGrip -= gripStep;
       if (curGrip <= SERVO_G_CLOSE) {
         curGrip = SERVO_G_CLOSE;
-        mode = mDriveGoal;
+        removeCan(targetCan);
+        if (irbF) mode = mDriveGoal;  // detect if a can is in the gripper
+        else mode = mWander;
       }
 
       lastGrip = millis();
@@ -272,7 +296,8 @@ void loop() {
 
   case mDriveGoal:
     if (newState) {
-      RobotBase.turnToAndDrive(MAX_X, 0);
+      RobotBase.setMax(40, 2.0); //cm/s, Rad/s
+      RobotBase.turnToAndDrive(GOAL_X, GOAL_Y);
     } 
     else if (RobotBase.navDone()) {
       mode = mDropCan;
@@ -320,6 +345,7 @@ void loop() {
   }
 }
 
+
 #define OBJ_MIN_WIDTH 3
 #define OBJ_MAX_WIDTH 14
 
@@ -339,28 +365,31 @@ void detectCan(int sensor, int curDist) {
 
   if (curDist > min && curDist < max) {  // ignore values outside the sensors specs
     // calculate detected object x,y position
-    objX = curDist * (0.573576436) + RobotBase.getX();
-    objY = curDist * (0.819152044) + RobotBase.getY();
+    objX = curDist * (cos(sensors[sensor].angle) ) + RobotBase.getX();
+    objY = curDist * (sin(sensors[sensor].angle) ) + RobotBase.getY();
     if (objX < MAX_X && objX > MIN_X && objY < MAX_Y && objY > MIN_Y) {
-      Serial.print(sensor);
-      Serial.print(":");
-      Serial.print(curDist);
-      Serial.print(", ");
-      Serial.println(diff);
-
 
       if (diff < -objDistThresh) {  // we found something
         obj[sensor].start.x = objX;
         obj[sensor].start.y = objY;
         obj[sensor].active = true;
+#if DEBUG_DETECT_CAN       
         Serial.println("");
         Serial.println("!! START !!");
-        Serial.print("Pos: ");
+        Serial.print("IR: ");
+        Serial.print(sensor);
+        Serial.print("  Dist: ");
+        Serial.print(curDist);
+        Serial.print("  Pos: ");
         Serial.print(int(objX));
         Serial.print(",");
         Serial.println(int(objY));
-        Serial.println(millis());
         Serial.println("");
+        Serial.print("Robot pos: ");
+        Serial.print(RobotBase.getX());
+        Serial.print(",");
+        Serial.println(RobotBase.getY());
+#endif
       } 
       else if (obj[sensor].active && diff > objDistThresh) {
         obj[sensor].last.x = objX;
@@ -368,16 +397,28 @@ void detectCan(int sensor, int curDist) {
         double dX = obj[sensor].start.x - obj[sensor].last.x;
         double dY = obj[sensor].start.y - obj[sensor].last.y;
         obj[sensor].width = hypot(dX, dY);
-        Serial.print("width: ");
-        Serial.println(obj[sensor].width);
+
         if (obj[sensor].width > OBJ_MIN_WIDTH && obj[sensor].width < OBJ_MAX_WIDTH) {  // I think it's a can
-          Serial.println("$$ FOUND CAN $$");
+#if DEBUG_DETECT_CAN   
+          Serial.print("IR: ");
+          Serial.print(sensor);
+          Serial.print("  width: ");
+          Serial.println(obj[sensor].width);          
+          Serial.print("$$ FOUND CAN $$  ");
+
+          Serial.print("Pos: ");
+          Serial.print(posX);
+          Serial.print(",");
+          Serial.println(posY);
+#endif
           float posX = (obj[sensor].start.x + obj[sensor].last.x) / 2;
           float posY = (obj[sensor].start.y + obj[sensor].last.y) / 2;
           addCan(posX,posY);
         }
         resetCanDetection(sensor);
-        Serial.println("## RESET ##");
+        Serial.print("IR: ");
+        Serial.print(sensor);
+        Serial.println("  ## RESET ##");
       }
       else if (obj[sensor].active ) {
         obj[sensor].last.x = objX;
@@ -443,8 +484,10 @@ void addCan(float x, float y) {
 }
 
 void removeCan(int canIndex) {
+  cans[nextCan].ts = 0;
   cans[canIndex].next = nextCan;
   nextCan = canIndex;
+  targetCan == -1;
 }
 
 void lcdInit() {
@@ -452,6 +495,28 @@ void lcdInit() {
   // set up the LCD's number of columns and rows: 
   lcd.begin(16, 2);
   lcd.setBacklight(WHITE);
+}
+
+void bumperInit(){
+  pinMode(LED, OUTPUT);
+  pinMode(IRB_FR, INPUT);
+  attachInterrupt(IRB_FR, bumperFR, CHANGE);
+  pinMode(IRB_F, INPUT);
+  attachInterrupt(IRB_F, bumperF, CHANGE);
+  pinMode(IRB_FL, INPUT);
+  attachInterrupt(IRB_FL, bumperFL, CHANGE);
+}
+
+void bumperFR() {
+  irbFR = !irbFR;
+}
+
+void bumperF() {
+  irbF = !irbF;
+}
+
+void bumperFL() {
+  irbFL = !irbFL;
 }
 
 void debugIr() {
@@ -483,29 +548,6 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
