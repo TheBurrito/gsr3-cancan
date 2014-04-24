@@ -34,7 +34,7 @@ ObjInfo obj[IR_END];
 
 TimedAction irAction = TimedAction(20,readIrSensors);  // Scan IR Sensors every 800ms
 TimedAction debugIrAction = TimedAction(1000,debugIr);
-TimedAction chooseCanAction = TimedAction(200,chooseCan);
+TimedAction chooseCanAction = TimedAction(500,chooseCan);
 
 LiquidTWI2 lcd(0);
 
@@ -80,9 +80,9 @@ LiquidTWI2 lcd(0);
 #endif
 
 #if ARENA == 3 // ft * in/ft * cm/in
-#define MAX_X 8 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
+#define MAX_X 8 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET - 13
 #define MAX_Y 4 / 2 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
-#define MIN_X 20 - ROBOT_FRONT_OFFSET + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
+#define MIN_X WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET 
 #define MIN_Y -4 / 2 * 12 * 2.54 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
 #define GOAL_X MAX_X
 #define GOAL_Y 0
@@ -136,6 +136,12 @@ SensorInfo sensors[IR_END];
 volatile int irbFR = LOW;
 volatile int irbF  = LOW;
 volatile int irbFL = LOW;
+
+// Attempt to prevent any infinite loops
+int errorThresh = 5;  
+int errorCnt = 0;
+
+double dXcan, dYcan, dHcan;  // distance to can calculations
 
 void setup() {
 
@@ -214,6 +220,14 @@ void loop() {
     irAction.check();
   }
 
+  if (errorCnt > errorThresh) {
+    // ToDo call reset function
+    targetCan = -1;
+    mode = mWander;
+    restart = true;
+    errorCnt = 0;
+  }
+
   newState = (lastMode != mode) || restart;
   restart = false;
 
@@ -246,8 +260,8 @@ void loop() {
     if (newState) {
       int destX;
 
-      if (atGoal) destX = 0;
-      else destX = 180;
+      if (atGoal) destX = MIN_X + 5;
+      else destX = MAX_X - 10;
 
       RobotBase.driveTo(destX, 0);
     } 
@@ -265,8 +279,15 @@ void loop() {
   case mDriveCan:
     if (newState) {
       RobotBase.setMax(30, 2.0); //cm/s, Rad/s
+      // ToDo use offset from front case to stop short of can instead of on top of
       RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y);
-    } 
+      dXcan = cans[targetCan].pos.x - RobotBase.getX();
+      dYcan = cans[targetCan].pos.y - RobotBase.getY();
+      dHcan = hypot(dXcan, dYcan);
+      if (RobotBase.irDistance(IRF) > dHcan + 10) {
+        errorCnt++;
+      } 
+    }
     else if (RobotBase.navDone()) {
       mode = mGrabCan;
     }
@@ -283,19 +304,22 @@ void loop() {
       curGrip -= gripStep;
       if (curGrip <= SERVO_G_CLOSE) {
         curGrip = SERVO_G_CLOSE;
-        removeCan(targetCan);
         if (irbF) mode = mDriveGoal;  // detect if a can is in the gripper
-        else mode = mWander;
+        else {
+          curGrip = SERVO_G_OPEN;
+          removeCan(targetCan);
+          mode = mWander;
+        }
       }
 
       lastGrip = millis();
-
       servoG.write(curGrip);
     }
     break;
 
   case mDriveGoal:
     if (newState) {
+      removeCan(targetCan);
       RobotBase.setMax(40, 2.0); //cm/s, Rad/s
       RobotBase.turnToAndDrive(GOAL_X, GOAL_Y);
     } 
@@ -346,12 +370,14 @@ void loop() {
 }
 
 
-#define OBJ_MIN_WIDTH 3
+#define OBJ_MIN_WIDTH 4
 #define OBJ_MAX_WIDTH 14
 
 void detectCan(int sensor, int curDist) {
+  if (mode != mWander) return;
+  if (sensor == IRF) return;
   bool edgeFound = false;
-  static int objDistThresh = 5;
+  static int objDistThresh = 10;
   int diff = curDist - obj[sensor].lastDist;
   obj[sensor].lastDist = curDist;
 
@@ -373,38 +399,48 @@ void detectCan(int sensor, int curDist) {
     float objY = curDist * (sin(sensors[sensor].angle) ) + sensY;
     if (objX < MAX_X && objX > MIN_X && objY < MAX_Y && objY > MIN_Y) {
 
-#if DEBUG_DETECT_CAN       
-      Serial.println("");
-      Serial.print("IR: ");
-      Serial.print(sensor);
-      Serial.print("  rPos: ");
-      Serial.print(int(RobotBase.getX()));
-      Serial.print(",");
-      Serial.print(int(RobotBase.getY()));
-      Serial.print("  sPos: ");
-      Serial.print(int(sensX));
-      Serial.print(",");
-      Serial.print(int(sensY));
-      Serial.print("  Dist: ");
-      Serial.print(curDist);
-      Serial.print("  oPos: ");
-      Serial.print(int(objX));
-      Serial.print(",");
-      Serial.println(int(objY));
-
-#endif
       if (!obj[sensor].active) {
 #if DEBUG_DETECT_CAN       
-        Serial.println("** START **");
+        Serial.print("IR: ");
+        Serial.print(sensor);
+        Serial.print("  ** START **  ");
+        Serial.print(int(RobotBase.getX()));
+        Serial.print(",");
+        Serial.print(int(RobotBase.getY()));
+        Serial.print("  sPos: ");
+        Serial.print(int(sensX));
+        Serial.print(",");
+        Serial.print(int(sensY));
+        Serial.print("  Dist: ");
+        Serial.print(curDist);
+        Serial.print("  oPos: ");
+        Serial.print(int(objX));
+        Serial.print(",");
+        Serial.println(int(objY));
 #endif      
         obj[sensor].start.x = objX;
         obj[sensor].start.y = objY;
         obj[sensor].active = true;
       }
 
-      if (diff < -objDistThresh) {  // found something closer
+      else if (diff < -objDistThresh) {  // found something closer
 #if DEBUG_DETECT_CAN       
-        Serial.println("** RESTART **");
+        Serial.print("IR: ");
+        Serial.print(sensor);
+        Serial.print("  ** RESTART **  ");
+        Serial.print(int(RobotBase.getX()));
+        Serial.print(",");
+        Serial.print(int(RobotBase.getY()));
+        Serial.print("  sPos: ");
+        Serial.print(int(sensX));
+        Serial.print(",");
+        Serial.print(int(sensY));
+        Serial.print("  Dist: ");
+        Serial.print(curDist);
+        Serial.print("  oPos: ");
+        Serial.print(int(objX));
+        Serial.print(",");
+        Serial.println(int(objY));
 #endif
         obj[sensor].start.x = objX;
         obj[sensor].start.y = objY;
@@ -433,8 +469,8 @@ void detectCan(int sensor, int curDist) {
   }
 
   if (edgeFound) {
- //   obj[sensor].last.x = objX;
- //   obj[sensor].last.y = objY;          
+    //   obj[sensor].last.x = objX;
+    //   obj[sensor].last.y = objY;          
     double dX = obj[sensor].start.x - obj[sensor].last.x;
     double dY = obj[sensor].start.y - obj[sensor].last.y;
     obj[sensor].width = hypot(dX, dY);
@@ -442,24 +478,28 @@ void detectCan(int sensor, int curDist) {
     if (obj[sensor].width > OBJ_MIN_WIDTH && obj[sensor].width < OBJ_MAX_WIDTH) {  // I think it's a can
       float posX = (obj[sensor].start.x + obj[sensor].last.x) / 2;
       float posY = (obj[sensor].start.y + obj[sensor].last.y) / 2;
-      addCan(posX,posY);
 #if DEBUG_DETECT_CAN   
+      Serial.println("");
       Serial.print("IR: ");
       Serial.print(sensor);
-      Serial.print("  width: ");
-      Serial.println(obj[sensor].width);          
-      Serial.print("$$ FOUND CAN $$  ");
-
+      Serial.print("  $$ FOUND CAN $$  ");
       Serial.print("Pos: ");
       Serial.print(posX);
       Serial.print(",");
-      Serial.println(posY);
+      Serial.print(posY);
+      Serial.print("  width: ");
+      Serial.println(obj[sensor].width);          
+      Serial.println("");
 #endif
+      addCan(posX,posY);
+
     }
     resetCanDetection(sensor);
+#if DEBUG_DETECT_CAN  
     Serial.print("IR: ");
     Serial.print(sensor);
-    Serial.println("  ## RESET ##");  
+    Serial.println("  ## RESET ## (Edge Found)");   
+#endif    
   }
 }
 
@@ -486,7 +526,7 @@ void chooseCan() {
             targetCan = i;
           }
         }
-        else {
+        else {  // not first can
           if (cans[i].distToGoal < dist) {
             dist = cans[i].distToGoal;
             targetCan = i;
@@ -504,25 +544,44 @@ void readIrSensors() {
 }
 
 void addCan(float x, float y) {
-  double dX = GOAL_X - x;
-  double dY = GOAL_Y - y;
-  double distToGoal = hypot(dX,dY);
+  bool duplicate = false;  // prevent duplicate cans in the list
+  for (int i = 0; i < canCapacity; i++) {
+    if (!duplicate) {
+      if (cans[i].ts != 0) {
+        if (fabs(cans[i].pos.x - x) < 20 || fabs(cans[i].pos.y - y) < 20) {
+          duplicate = true;
+        }
+      }
+    }
 
-  cans[nextCan].ts = millis();  
-  cans[nextCan].pos.x = x;
-  cans[nextCan].pos.y = y;
-  cans[nextCan].distToGoal = distToGoal;
-  nextCan = cans[nextCan].next;
-  if (nextCan == -1) {  // our can capacity is full clear out an old one
-    // ToDo: write a function that searches for oldest timestamp
+  }
+
+  if (!duplicate) {  // if the can is not a duplicate add it to the list
+    double dX = GOAL_X - x;
+    double dY = GOAL_Y - y;
+    double distToGoal = hypot(dX,dY);
+
+    cans[nextCan].ts = millis();  
+    cans[nextCan].pos.x = x;
+    cans[nextCan].pos.y = y;
+    cans[nextCan].distToGoal = distToGoal;
+    nextCan = cans[nextCan].next;
+    if (nextCan == -1) {  // our can capacity is full clear out an old one
+      // ToDo: write a function that searches for oldest timestamp
+    }
+  }
+  else {
+#if DEBUG_DETECT_CAN       
+    Serial.println("** Discard Duplicate Can **");
+#endif
   }
 }
 
 void removeCan(int canIndex) {
-  cans[nextCan].ts = 0;
+  cans[canIndex].ts = 0;
   cans[canIndex].next = nextCan;
   nextCan = canIndex;
-  targetCan == -1;
+  targetCan = -1;
 }
 
 void lcdInit() {
@@ -583,6 +642,12 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
+
+
+
+
+
 
 
 
