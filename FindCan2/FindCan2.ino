@@ -10,7 +10,7 @@
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
-#define DEBUG_DETECT_CAN false
+#define DEBUG_DETECT_CAN true
 
 Servo servoG; // define the Gripper Servo
 #define SERVO_G_CLOSE 36
@@ -153,20 +153,20 @@ void setup() {
 
   // Sensor offsets from robot center
   sensors[IRL].offset.x = 0;
-  sensors[IRL].offset.y = -8.0;
-  sensors[IRL].angle = 90;
+  sensors[IRL].offset.y = 8.0;
+  sensors[IRL].angle = 90 * PI / 180;
   sensors[IRFL].offset.x = 4.1;
-  sensors[IRFL].offset.y = -6.2;
-  sensors[IRFL].angle = 55;  
+  sensors[IRFL].offset.y = 6.2;
+  sensors[IRFL].angle = 45 * PI / 180;  
   sensors[IRF].offset.x = 7.3;
-  sensors[IRF].offset.y = -1.2;
-  sensors[IRF].angle = 0;
+  sensors[IRF].offset.y = 1.2;
+  sensors[IRF].angle = 0 * PI / 180;
   sensors[IRFR].offset.x = 5.7;
-  sensors[IRFR].offset.y = 4.8;
-  sensors[IRFR].angle = -35;
+  sensors[IRFR].offset.y = -4.8;
+  sensors[IRFR].angle = -45 * PI / 180;
   sensors[IRR].offset.x = 0;
-  sensors[IRR].offset.y = 8.0;
-  sensors[IRR].angle = -90;
+  sensors[IRR].offset.y = -8.0;
+  sensors[IRR].angle = -90 * PI / 180;
 
   //Establish PID gains
   RobotBase.setPID(10, 4, 0);
@@ -350,7 +350,7 @@ void loop() {
 #define OBJ_MAX_WIDTH 14
 
 void detectCan(int sensor, int curDist) {
-  float objX, objY;
+  bool edgeFound = false;
   static int objDistThresh = 5;
   int diff = curDist - obj[sensor].lastDist;
   obj[sensor].lastDist = curDist;
@@ -365,67 +365,102 @@ void detectCan(int sensor, int curDist) {
 
   if (curDist > min && curDist < max) {  // ignore values outside the sensors specs
     // calculate detected object x,y position
-    objX = curDist * (cos(sensors[sensor].angle) ) + RobotBase.getX();
-    objY = curDist * (sin(sensors[sensor].angle) ) + RobotBase.getY();
+    float sensXrel = RobotBase.getX() + sensors[sensor].offset.x;
+    float sensYrel = RobotBase.getY() + sensors[sensor].offset.y;
+    float sensX = sensXrel * cos(RobotBase.getTheta()) - sensYrel * sin(RobotBase.getTheta());
+    float sensY = sensXrel * sin(RobotBase.getTheta()) + sensYrel * cos(RobotBase.getTheta());
+    float objX = curDist * (cos(sensors[sensor].angle) ) + sensX;
+    float objY = curDist * (sin(sensors[sensor].angle) ) + sensY;
     if (objX < MAX_X && objX > MIN_X && objY < MAX_Y && objY > MIN_Y) {
 
-      if (diff < -objDistThresh) {  // we found something
+#if DEBUG_DETECT_CAN       
+      Serial.println("");
+      Serial.print("IR: ");
+      Serial.print(sensor);
+      Serial.print("  rPos: ");
+      Serial.print(int(RobotBase.getX()));
+      Serial.print(",");
+      Serial.print(int(RobotBase.getY()));
+      Serial.print("  sPos: ");
+      Serial.print(int(sensX));
+      Serial.print(",");
+      Serial.print(int(sensY));
+      Serial.print("  Dist: ");
+      Serial.print(curDist);
+      Serial.print("  oPos: ");
+      Serial.print(int(objX));
+      Serial.print(",");
+      Serial.println(int(objY));
+
+#endif
+      if (!obj[sensor].active) {
+#if DEBUG_DETECT_CAN       
+        Serial.println("** START **");
+#endif      
         obj[sensor].start.x = objX;
         obj[sensor].start.y = objY;
         obj[sensor].active = true;
+      }
+
+      if (diff < -objDistThresh) {  // found something closer
 #if DEBUG_DETECT_CAN       
-        Serial.println("");
-        Serial.println("!! START !!");
-        Serial.print("IR: ");
-        Serial.print(sensor);
-        Serial.print("  Dist: ");
-        Serial.print(curDist);
-        Serial.print("  Pos: ");
-        Serial.print(int(objX));
-        Serial.print(",");
-        Serial.println(int(objY));
-        Serial.println("");
-        Serial.print("Robot pos: ");
-        Serial.print(RobotBase.getX());
-        Serial.print(",");
-        Serial.println(RobotBase.getY());
+        Serial.println("** RESTART **");
 #endif
+        obj[sensor].start.x = objX;
+        obj[sensor].start.y = objY;
+        obj[sensor].active = true;
+
       } 
       else if (obj[sensor].active && diff > objDistThresh) {
-        obj[sensor].last.x = objX;
-        obj[sensor].last.y = objY;          
-        double dX = obj[sensor].start.x - obj[sensor].last.x;
-        double dY = obj[sensor].start.y - obj[sensor].last.y;
-        obj[sensor].width = hypot(dX, dY);
-
-        if (obj[sensor].width > OBJ_MIN_WIDTH && obj[sensor].width < OBJ_MAX_WIDTH) {  // I think it's a can
-#if DEBUG_DETECT_CAN   
-          Serial.print("IR: ");
-          Serial.print(sensor);
-          Serial.print("  width: ");
-          Serial.println(obj[sensor].width);          
-          Serial.print("$$ FOUND CAN $$  ");
-
-          Serial.print("Pos: ");
-          Serial.print(posX);
-          Serial.print(",");
-          Serial.println(posY);
-#endif
-          float posX = (obj[sensor].start.x + obj[sensor].last.x) / 2;
-          float posY = (obj[sensor].start.y + obj[sensor].last.y) / 2;
-          addCan(posX,posY);
-        }
-        resetCanDetection(sensor);
-        Serial.print("IR: ");
-        Serial.print(sensor);
-        Serial.println("  ## RESET ##");
+        edgeFound = true;
       }
       else if (obj[sensor].active ) {
         obj[sensor].last.x = objX;
         obj[sensor].last.y = objY;
       }
+    } // endif object reading is out of bounds
+    else {  
+      if (obj[sensor].active) {
+        edgeFound = true;
+      }
     }
-  }  
+
+  }  // endif sensor reading within specs
+  else {
+    if (obj[sensor].active) {
+      edgeFound = true;
+    }
+  }
+
+  if (edgeFound) {
+ //   obj[sensor].last.x = objX;
+ //   obj[sensor].last.y = objY;          
+    double dX = obj[sensor].start.x - obj[sensor].last.x;
+    double dY = obj[sensor].start.y - obj[sensor].last.y;
+    obj[sensor].width = hypot(dX, dY);
+
+    if (obj[sensor].width > OBJ_MIN_WIDTH && obj[sensor].width < OBJ_MAX_WIDTH) {  // I think it's a can
+      float posX = (obj[sensor].start.x + obj[sensor].last.x) / 2;
+      float posY = (obj[sensor].start.y + obj[sensor].last.y) / 2;
+      addCan(posX,posY);
+#if DEBUG_DETECT_CAN   
+      Serial.print("IR: ");
+      Serial.print(sensor);
+      Serial.print("  width: ");
+      Serial.println(obj[sensor].width);          
+      Serial.print("$$ FOUND CAN $$  ");
+
+      Serial.print("Pos: ");
+      Serial.print(posX);
+      Serial.print(",");
+      Serial.println(posY);
+#endif
+    }
+    resetCanDetection(sensor);
+    Serial.print("IR: ");
+    Serial.print(sensor);
+    Serial.println("  ## RESET ##");  
+  }
 }
 
 void resetCanDetection(int sensor) {
@@ -548,6 +583,10 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
+
+
+
 
 
 
