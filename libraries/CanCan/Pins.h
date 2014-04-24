@@ -23,16 +23,16 @@
 // pin A8 (22)
 // pin A9 (23)
 #define IR_R   A12             // pin A12 (Analog Only)
-#define IRB_FR 24              // Bumper pin 24  
-#define IRB_F  25              // pin 25 (PWM)
+#define IRB_FR 24 // Bumper    // pin 24  
+#define IRB_F  25 // Bumper    // pin 25 (PWM)
 #define IR_FR A15              // pin 26 (A15)
 #define IR_F  A16              // pin 27 (A16)
 // pin 28 (A17)
-// pin 29 (A18)
+#define IRB_FL 29 // Bumper    // pin 29 (A18)
 // pin 30 (A19)
 #define IR_FL  A20             // pin 31 (A20)
 extern int SERVO_G;            // pin 32 (PWM)
-#define IRB_FL 33              // pin 33
+// pin 33
 #define IR_L   A13             // pin A13 (Analog Only)
 
 #endif //PINS_H_
