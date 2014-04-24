@@ -4,7 +4,7 @@
 
 #include <DualMC33926MotorShield.h>
 #include <Encoder.h>
-#include "../Pins/Pins.h"
+#include "Pins.h"
 
 Encoder m1Enc(m1EncA, m1EncB); 
 Encoder m2Enc(m2EncB, m2EncA); // reversed so forward counts up
@@ -218,6 +218,10 @@ void CRobotBase::setIRPeriod(long ir_ms) {
 	_ir_ms = ir_ms;
 }
 
+void CRobotBase::setIRSamples(int ir_samples) {
+	_irSamples = ir_samples;
+}
+
 int CRobotBase::irDistance(IR_Index ir) {
 	return _irDist[ir];
 }
@@ -324,21 +328,27 @@ void CRobotBase::setVelocityAndTurn(const double& vel, const double& turn) {
 
 	
 int CRobotBase::readIR(IR_Index ir) {
-	int raw=analogRead(_irPins[ir]);
-    float voltFromRaw=raw * 3.225806452; //based on 3.3V reference
+	int raw = analogRead(_irPins[ir]);
+    float voltFromRaw = raw * 3.225806452; //based on 3.3V reference
     
     int puntualDistance = -1;
     
     switch (_irModels[ir]) {
     case IR_1080:
-        puntualDistance=27.728*pow(voltFromRaw/1000, -1.2045);
+    	for (int i; i < _irSamples; i++) {
+    		puntualDistance += 27.728 * pow(voltFromRaw / 1000, - 1.2045);
+    	}
+        puntualDistance = puntualDistance / _irSamples;
         if (puntualDistance > 80) puntualDistance = 81;
         if (puntualDistance < 10) puntualDistance  = 9;
         break;
         
         
     case IR_20150:
-        puntualDistance=61.573*pow(voltFromRaw/1000, -1.1068);
+    	for (int i; i < _irSamples; i++) {
+    		puntualDistance += 61.573 * pow(voltFromRaw / 1000, - 1.1068);
+    	}
+        puntualDistance = puntualDistance / _irSamples;
         if (puntualDistance > 150) puntualDistance = 151;
         if (puntualDistance < 20) puntualDistance  = 19;
         break;

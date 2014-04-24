@@ -42,6 +42,7 @@ public:
 	void setIRPeriod(long ir_ms);
 	
 	void setIRFilter(double factor);
+	void setIRSamples(int ir_samples);
 	void readAllIR();
 	
 	int irDistance(IR_Index ir);
@@ -129,6 +130,8 @@ private:
 	int _irDiff[IR_END];
 	
 	double _irFact;
+	
+	int _irSamples;
 	
 	SimplePID::PID _pidL, _pidR;
 };
