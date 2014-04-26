@@ -1,7 +1,7 @@
 #include "RobotBase.h"
 
 #include <Arduino.h>
-
+//#include <algorithm>
 #include <DualMC33926MotorShield.h>
 #include <Encoder.h>
 #include "Pins.h"
@@ -328,33 +328,53 @@ void CRobotBase::setVelocityAndTurn(const double& vel, const double& turn) {
 
 	
 int CRobotBase::readIR(IR_Index ir) {
-	int raw = analogRead(_irPins[ir]);
-    float voltFromRaw = raw * 3.225806452; //based on 3.3V reference
+	int raw, vals[_irSamples], sum;
+    float voltFromRaw; //based on 3.3V reference
     
     int puntualDistance = -1;
     
     switch (_irModels[ir]) {
     case IR_1080:
-    	for (int i; i < _irSamples; i++) {
-    		puntualDistance += 27.728 * pow(voltFromRaw / 1000, - 1.2045);
+    	for (int i = 0; i < _irSamples; i++) {
+    		raw = analogRead(_irPins[ir]);
+    		voltFromRaw = raw * 3.225806452;
+    		vals[i] = 27.728 * pow(voltFromRaw / 1000, - 1.2045);
     	}
-        puntualDistance = puntualDistance / _irSamples;
+//    	std::sort(vals, vals + _irSamples);
+    	sum = 0;
+    	for (int i = 0; i < _irSamples; i++) {
+//    		if (i != 0 && i != _irSamples - 1) {
+    			sum = sum + vals[i];
+//    		}
+    	}
+    	puntualDistance = sum / (_irSamples - 0);
+ 
         if (puntualDistance > 80) puntualDistance = 81;
         if (puntualDistance < 10) puntualDistance  = 9;
         break;
         
         
     case IR_20150:
-    	for (int i; i < _irSamples; i++) {
-    		puntualDistance += 61.573 * pow(voltFromRaw / 1000, - 1.1068);
+    	for (int i = 0; i < _irSamples; i++) {
+    		raw = analogRead(_irPins[ir]);
+    		voltFromRaw = raw * 3.225806452;
+    		vals[i] = 61.573 * pow(voltFromRaw / 1000, - 1.1068);
     	}
-        puntualDistance = puntualDistance / _irSamples;
+//    	std::sort(vals, vals + _irSamples);
+    	sum = 0;
+    	for (int i = 0; i < _irSamples; i++) {
+//    		if (i != 0 && i != _irSamples - 1) {
+    			sum = sum + vals[i];
+//    		}
+    	}
+    	puntualDistance = sum / (_irSamples - 0);
+
         if (puntualDistance > 150) puntualDistance = 151;
         if (puntualDistance < 20) puntualDistance  = 19;
         break;
     }
     
-    _irDist[ir] = (puntualDistance * _irFact) + _irPrevDist[ir] * (1.0 - _irFact);
+    _irDist[ir] = puntualDistance;  // * _irFact) + _irPrevDist[ir] * (1.0 - _irFact);
     _irPrevDist[ir] = _irDist[ir];
     
     return puntualDistance;
