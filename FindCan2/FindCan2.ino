@@ -10,7 +10,7 @@
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
-#define DEBUG_DETECT_CAN true
+#define DEBUG_DETECT_CAN false
 
 Servo servoG; // define the Gripper Servo
 #define SERVO_G_CLOSE 36
@@ -35,6 +35,7 @@ ObjInfo obj[IR_END];
 TimedAction irAction = TimedAction(20,readIrSensors);  // Scan IR Sensors every 800ms
 TimedAction debugIrAction = TimedAction(1000,debugIr);
 TimedAction chooseCanAction = TimedAction(500,chooseCan);
+TimedAction celebrateAction = TimedAction(150,celebrate);
 
 LiquidTWI2 lcd(0);
 
@@ -111,6 +112,8 @@ long lastGrip;
 unsigned long targetTime;
 
 bool atGoal = false;
+bool celebrateGoal = false;
+int cCycle = 1;
 
 struct canInfo {
   unsigned long ts;  // timestamp
@@ -142,6 +145,10 @@ int errorThresh = 5;
 int errorCnt = 0;
 
 double dXcan, dYcan, dHcan;  // distance to can calculations
+
+int scanSpeed = 20;
+int goalSpeed = 45;
+int canSpeed = 35;
 
 void setup() {
 
@@ -181,7 +188,7 @@ void setup() {
   RobotBase.setAccel(50);
 
   //Set max velocity and turn rate
-  RobotBase.setMax(20, 2.0); //cm/s, Rad/s
+  RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
 
   //set motor output ranges - works both positive and negative
   //Max, dead zone, min
@@ -201,10 +208,10 @@ void setup() {
   RobotBase.setNavPeriod(10);
   RobotBase.setIRPeriod(10);
   RobotBase.setIRFilter(0.7);
-
+  RobotBase.setIRSamples(5);
 
   Serial.begin(115200);
-  //  Serial1.begin(9600);
+  //  Serial.begin(9600);
   lcdInit();
   bumperInit();
   servoG.attach(SERVO_G);  // init gripper servo
@@ -214,6 +221,8 @@ void setup() {
 
 void loop() {
   RobotBase.update();
+
+  if (celebrateGoal) celebrateAction.check();
 
   if (mode != mWaitStart) {
     chooseCanAction.check();
@@ -256,8 +265,9 @@ void loop() {
     break;
 
   case mWander:
-    RobotBase.setMax(20, 2.0); //cm/s, Rad/s
+    RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
     if (newState) {
+      lcd.setBacklight(YELLOW);
       int destX;
 
       if (atGoal) destX = MIN_X + 5;
@@ -278,23 +288,39 @@ void loop() {
 
   case mDriveCan:
     if (newState) {
-      RobotBase.setMax(30, 2.0); //cm/s, Rad/s
+      lcd.setBacklight(TEAL);
+      RobotBase.setMax(canSpeed, 2.0); //cm/s, Rad/s
       // ToDo use offset from front case to stop short of can instead of on top of
       RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y);
-      dXcan = cans[targetCan].pos.x - RobotBase.getX();
-      dYcan = cans[targetCan].pos.y - RobotBase.getY();
-      dHcan = hypot(dXcan, dYcan);
-      if (RobotBase.irDistance(IRF) > dHcan + 10) {
-        errorCnt++;
-      } 
     }
     else if (RobotBase.navDone()) {
       mode = mGrabCan;
     }
+    /*
+    else {
+     dXcan = cans[targetCan].pos.x - RobotBase.getX();
+     dYcan = cans[targetCan].pos.y - RobotBase.getY();
+     dHcan = hypot(dXcan, dYcan);
+     Serial.print("IRF Dist: ");
+     Serial.print(RobotBase.irDistance(IRF));
+     Serial.print("  Can Dist: ");
+     Serial.println(dHcan);
+     if (dHcan < 70) {
+     if (RobotBase.irDistance(IRF) > dHcan + 10) {
+     if (errorCnt >=  5) {
+     RobotBase.stop();
+     mode = mWander;
+     }
+     errorCnt++;
+     } 
+     }
+     }
+     */
     break;
 
   case mGrabCan:
     if (newState) {
+      lcd.setBacklight(VIOLET);
       lastGrip = millis();
       curGrip = SERVO_G_OPEN;
       RobotBase.stop();     
@@ -306,9 +332,13 @@ void loop() {
         curGrip = SERVO_G_CLOSE;
         if (irbF) mode = mDriveGoal;  // detect if a can is in the gripper
         else {
-          curGrip = SERVO_G_OPEN;
-          removeCan(targetCan);
-          mode = mWander;
+          if (errorCnt = errorThresh) {
+            errorCnt = 0;
+            curGrip = SERVO_G_OPEN;
+            removeCan(targetCan);
+            mode = mWander;
+          }
+          else errorCnt++;
         }
       }
 
@@ -319,8 +349,9 @@ void loop() {
 
   case mDriveGoal:
     if (newState) {
+      lcd.setBacklight(GREEN);
       removeCan(targetCan);
-      RobotBase.setMax(40, 2.0); //cm/s, Rad/s
+      RobotBase.setMax(goalSpeed, 2.0); //cm/s, Rad/s
       RobotBase.turnToAndDrive(GOAL_X, GOAL_Y);
     } 
     else if (RobotBase.navDone()) {
@@ -330,6 +361,7 @@ void loop() {
 
   case mDropCan:
     if (newState) {
+      celebrateGoal = true;
       lastGrip = millis();
       curGrip = SERVO_G_CLOSE;
       RobotBase.stop();
@@ -369,15 +401,14 @@ void loop() {
   }
 }
 
-
 #define OBJ_MIN_WIDTH 4
 #define OBJ_MAX_WIDTH 14
 
 void detectCan(int sensor, int curDist) {
   if (mode != mWander) return;
-  if (sensor == IRF) return;
+  if (sensor == IRF) return;  // don't try to detect cans by width with the front sensor
   bool edgeFound = false;
-  static int objDistThresh = 10;
+  static int objDistThresh = 15;
   int diff = curDist - obj[sensor].lastDist;
   obj[sensor].lastDist = curDist;
 
@@ -386,17 +417,18 @@ void detectCan(int sensor, int curDist) {
 
   if (sensor == 0 || sensor == 4) {
     min = 20;
-    max = 150;
+    max = 140;  // too many false postives if we scan all the way out to 150
   }
 
   if (curDist > min && curDist < max) {  // ignore values outside the sensors specs
     // calculate detected object x,y position
-    float sensXrel = RobotBase.getX() + sensors[sensor].offset.x;
-    float sensYrel = RobotBase.getY() + sensors[sensor].offset.y;
-    float sensX = sensXrel * cos(RobotBase.getTheta()) - sensYrel * sin(RobotBase.getTheta());
-    float sensY = sensXrel * sin(RobotBase.getTheta()) + sensYrel * cos(RobotBase.getTheta());
-    float objX = curDist * (cos(sensors[sensor].angle) ) + sensX;
-    float objY = curDist * (sin(sensors[sensor].angle) ) + sensY;
+    float relX = curDist * (cos(sensors[sensor].angle) ) + sensors[sensor].offset.x;
+    float relY = curDist * (sin(sensors[sensor].angle) ) + sensors[sensor].offset.y;
+    float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
+    float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
+    float objX = RobotBase.getX() + relXrotated;
+    float objY = RobotBase.getY() + relYrotated;
+
     if (objX < MAX_X && objX > MIN_X && objY < MAX_Y && objY > MIN_Y) {
 
       if (!obj[sensor].active) {
@@ -407,10 +439,6 @@ void detectCan(int sensor, int curDist) {
         Serial.print(int(RobotBase.getX()));
         Serial.print(",");
         Serial.print(int(RobotBase.getY()));
-        Serial.print("  sPos: ");
-        Serial.print(int(sensX));
-        Serial.print(",");
-        Serial.print(int(sensY));
         Serial.print("  Dist: ");
         Serial.print(curDist);
         Serial.print("  oPos: ");
@@ -431,10 +459,6 @@ void detectCan(int sensor, int curDist) {
         Serial.print(int(RobotBase.getX()));
         Serial.print(",");
         Serial.print(int(RobotBase.getY()));
-        Serial.print("  sPos: ");
-        Serial.print(int(sensX));
-        Serial.print(",");
-        Serial.print(int(sensY));
         Serial.print("  Dist: ");
         Serial.print(curDist);
         Serial.print("  oPos: ");
@@ -454,6 +478,7 @@ void detectCan(int sensor, int curDist) {
         obj[sensor].last.x = objX;
         obj[sensor].last.y = objY;
       }
+
     } // endif object reading is out of bounds
     else {  
       if (obj[sensor].active) {
@@ -537,6 +562,7 @@ void chooseCan() {
     firstCan = false;
   }
 }
+
 void readIrSensors() {
   for (int i = 0; i < IR_END; ++i) {
     detectCan(i, RobotBase.irDistance((IR_Index)i));
@@ -548,7 +574,7 @@ void addCan(float x, float y) {
   for (int i = 0; i < canCapacity; i++) {
     if (!duplicate) {
       if (cans[i].ts != 0) {
-        if (fabs(cans[i].pos.x - x) < 20 || fabs(cans[i].pos.y - y) < 20) {
+        if (fabs(cans[i].pos.x - x) < 10 && fabs(cans[i].pos.y - y) < 10) {
           duplicate = true;
         }
       }
@@ -582,6 +608,56 @@ void removeCan(int canIndex) {
   cans[canIndex].next = nextCan;
   nextCan = canIndex;
   targetCan = -1;
+}
+
+void celebrate() {
+  switch (cCycle) {
+  case 1:
+    lcd.setBacklight(OFF);
+    break; 
+  case 2:
+    lcd.setBacklight(WHITE);
+    break; 
+  case 3:
+    lcd.setBacklight(OFF);
+    break; 
+  case 4:
+    lcd.setBacklight(RED);
+    break; 
+  case 5:
+    lcd.setBacklight(OFF);
+    break; 
+  case 6:
+    lcd.setBacklight(BLUE);
+    break; 
+  case 7:
+    lcd.setBacklight(OFF);
+    break; 
+  case 8:
+    lcd.setBacklight(GREEN);
+    break; 
+  case 9:
+    lcd.setBacklight(OFF);
+    break; 
+  case 10:
+    lcd.setBacklight(VIOLET);
+    break; 
+  case 11:
+    lcd.setBacklight(OFF);
+    break; 
+  case 12:
+    lcd.setBacklight(TEAL);
+    break; 
+  case 14:
+    lcd.setBacklight(OFF);
+    break; 
+  case 15:
+    lcd.setBacklight(YELLOW);
+    cCycle = 1;
+    celebrateGoal = false;
+    break; 
+  }
+  cCycle++;
 }
 
 void lcdInit() {
@@ -642,6 +718,15 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
+
+
+
+
+
+
+
+
 
 
 
