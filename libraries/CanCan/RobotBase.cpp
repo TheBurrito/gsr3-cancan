@@ -328,7 +328,7 @@ void CRobotBase::setVelocityAndTurn(const double& vel, const double& turn) {
 
 	
 int CRobotBase::readIR(IR_Index ir) {
-	int raw, vals[_irSamples], sum;
+	int raw, val, sum, min, max;
     float voltFromRaw; //based on 3.3V reference
     
     int puntualDistance = -1;
@@ -338,18 +338,30 @@ int CRobotBase::readIR(IR_Index ir) {
     	for (int i = 0; i < _irSamples; i++) {
     		raw = analogRead(_irPins[ir]);
     		voltFromRaw = raw * 3.225806452;
-    		vals[i] = 27.728 * pow(voltFromRaw / 1000, - 1.2045);
+			val = 27.728 * pow(voltFromRaw / 1000, - 1.2045);
+			Serial.println(val);
+    		if ( i == 0) {
+    			sum = val;
+    			min = val;
+    			max = val;
+    		}
+    		else {
+				if (val < min) {
+					min = val;
+				}
+				if (val > max) {
+					max = val;
+				}
+				sum = sum + val;
+    		}
     	}
-//    	std::sort(vals, vals + _irSamples);
-    	sum = 0;
-    	for (int i = 0; i < _irSamples; i++) {
-//    		if (i != 0 && i != _irSamples - 1) {
-    			sum = sum + vals[i];
-//    		}
+    	
+    	if (_irSamples > 2) {
+    		puntualDistance = (sum - min - max) / (_irSamples - 2);
     	}
-    	puntualDistance = sum / (_irSamples - 0);
- 
-        if (puntualDistance > 80) puntualDistance = 81;
+    	else puntualDistance = sum / _irSamples;
+
+    	if (puntualDistance > 80) puntualDistance = 81;
         if (puntualDistance < 10) puntualDistance  = 9;
         break;
         
@@ -358,16 +370,27 @@ int CRobotBase::readIR(IR_Index ir) {
     	for (int i = 0; i < _irSamples; i++) {
     		raw = analogRead(_irPins[ir]);
     		voltFromRaw = raw * 3.225806452;
-    		vals[i] = 61.573 * pow(voltFromRaw / 1000, - 1.1068);
+    		val = 61.573 * pow(voltFromRaw / 1000, - 1.1068);
+    		if (i == 0) {
+    			sum = val;
+    			min = val;
+    			max = val;
+    		}
+    		else {
+				if (val < min) {
+					min = val;
+				}
+				if (val > max) {
+					max = val;
+				}
+				sum = sum + val;
+    		}
     	}
-//    	std::sort(vals, vals + _irSamples);
-    	sum = 0;
-    	for (int i = 0; i < _irSamples; i++) {
-//    		if (i != 0 && i != _irSamples - 1) {
-    			sum = sum + vals[i];
-//    		}
+
+    	if (_irSamples > 2) {
+    		puntualDistance = (sum - min - max) / (_irSamples - 2);
     	}
-    	puntualDistance = sum / (_irSamples - 0);
+    	else puntualDistance = sum / _irSamples;
 
         if (puntualDistance > 150) puntualDistance = 151;
         if (puntualDistance < 20) puntualDistance  = 19;
