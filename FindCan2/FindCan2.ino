@@ -32,9 +32,10 @@ struct ObjInfo {
 
 ObjInfo obj[IR_END];
 
-TimedAction irAction = TimedAction(20,readIrSensors);  // Scan IR Sensors every 800ms
+TimedAction irAction = TimedAction(40,readIrSensors); 
+TimedAction gripAction = TimedAction(20,gripper); 
 TimedAction debugIrAction = TimedAction(1000,debugIr);
-TimedAction chooseCanAction = TimedAction(500,chooseCan);
+TimedAction chooseCanAction = TimedAction(2000,chooseCan);
 TimedAction celebrateAction = TimedAction(150,celebrate);
 
 LiquidTWI2 lcd(0);
@@ -98,16 +99,26 @@ typedef enum {
   mDriveGoal,
   mDropCan,
   mBackup,
-  mStop
+  mStop,
+  mReset,
+  mEvadeRight,
+  mEvadeLeft
 } 
 Mode;
+
+typedef enum {
+  gOpen,
+  gClose
+} 
+GripState;
+
+GripState gripState = gOpen;
 
 Mode mode = mWaitStart, lastMode = mode, nextMode;
 
 bool newState = true, restart = false;
 
-int curGrip, gripStep = 1, gripDelay = 20;
-long lastGrip;
+int curGrip = SERVO_G_OPEN, gripStep = 1, gripDelay = 20;
 
 unsigned long targetTime;
 
@@ -182,7 +193,7 @@ void setup() {
   sensors[IRR].angle = -90 * PI / 180;
 
   //Establish PID gains
-  RobotBase.setPID(10, 4, 0);
+  RobotBase.setPID(10, 5, 0);
 
   //Set allowed accel for wheel velocity targets (cm/s/s)
   RobotBase.setAccel(50);
@@ -195,7 +206,7 @@ void setup() {
   // -deadZone > X < deadZone : X = 0
   // X < min : X = min
   // X > max : x = max
-  RobotBase.setOutputRange(300, 5, 50);
+  RobotBase.setOutputRange(350, 5, 60);
 
   //set ticks per desired distance unit
   RobotBase.setTicksPerUnit(71.65267); //units of cm
@@ -203,38 +214,53 @@ void setup() {
   //set the wheelbase of in desired distance unit
   RobotBase.setWidth(17.4); //units of cm
 
-  RobotBase.setNavThresh(2, 0.035);
+  RobotBase.setNavThresh(2, 0.04);
   RobotBase.setOdomPeriod(10);
   RobotBase.setNavPeriod(10);
-  RobotBase.setIRPeriod(10);
+  RobotBase.setIRPeriod(40);
   RobotBase.setIRFilter(0.7);
-  RobotBase.setIRSamples(5);
+  RobotBase.setIRSamples(1);
 
   Serial.begin(115200);
   //  Serial.begin(9600);
   lcdInit();
   bumperInit();
   servoG.attach(SERVO_G);  // init gripper servo
-  servoG.write(SERVO_G_OPEN);
   RobotBase.time();
 }
 
 void loop() {
   RobotBase.update();
 
+  gripAction.check();
+
   if (celebrateGoal) celebrateAction.check();
 
   if (mode != mWaitStart) {
     chooseCanAction.check();
     irAction.check();
-  }
 
-  if (errorCnt > errorThresh) {
-    // ToDo call reset function
-    targetCan = -1;
-    mode = mWander;
-    restart = true;
-    errorCnt = 0;
+    if (errorCnt > errorThresh) {
+      mode = mReset;
+    }
+
+    if (digitalReadFast(IRB_FL) == 0) {
+      if (mode != mEvadeRight) nextMode = lastMode;
+      if (nextMode == mDriveCan) nextMode = mWander;
+      mode = mEvadeRight;
+    }
+    else if (lastMode == mEvadeRight) {
+      mode = nextMode;
+    }
+
+    if (digitalReadFast(IRB_FR) == 0) {
+      if (mode != mEvadeLeft) nextMode = lastMode;
+      if (nextMode == mDriveCan) nextMode = mWander;
+      mode = mEvadeLeft;
+    }
+    else if (lastMode == mEvadeLeft) {
+      mode = nextMode;
+    }
   }
 
   newState = (lastMode != mode) || restart;
@@ -276,7 +302,10 @@ void loop() {
       RobotBase.driveTo(destX, 0);
     } 
     else {
-      if (targetCan != -1) {
+      if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
+        mode = mDriveGoal;
+      }      
+      else if (targetCan != -1) {
         mode = mDriveCan;
       } 
       else if (RobotBase.navDone()) {
@@ -289,62 +318,34 @@ void loop() {
   case mDriveCan:
     if (newState) {
       lcd.setBacklight(TEAL);
+      gripState = gOpen;
       RobotBase.setMax(canSpeed, 2.0); //cm/s, Rad/s
-      // ToDo use offset from front case to stop short of can instead of on top of
       RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y);
     }
     else if (RobotBase.navDone()) {
       mode = mGrabCan;
     }
-    /*
-    else {
-     dXcan = cans[targetCan].pos.x - RobotBase.getX();
-     dYcan = cans[targetCan].pos.y - RobotBase.getY();
-     dHcan = hypot(dXcan, dYcan);
-     Serial.print("IRF Dist: ");
-     Serial.print(RobotBase.irDistance(IRF));
-     Serial.print("  Can Dist: ");
-     Serial.println(dHcan);
-     if (dHcan < 70) {
-     if (RobotBase.irDistance(IRF) > dHcan + 10) {
-     if (errorCnt >=  5) {
-     RobotBase.stop();
-     mode = mWander;
-     }
-     errorCnt++;
-     } 
-     }
-     }
-     */
     break;
 
   case mGrabCan:
     if (newState) {
       lcd.setBacklight(VIOLET);
-      lastGrip = millis();
-      curGrip = SERVO_G_OPEN;
+      gripState = gClose;
       RobotBase.stop();     
     }
-
-    if (millis() - lastGrip >= gripDelay) {
-      curGrip -= gripStep;
-      if (curGrip <= SERVO_G_CLOSE) {
-        curGrip = SERVO_G_CLOSE;
-        if (irbF) mode = mDriveGoal;  // detect if a can is in the gripper
-        else {
-          if (errorCnt = errorThresh) {
-            errorCnt = 0;
-            curGrip = SERVO_G_OPEN;
-            removeCan(targetCan);
-            mode = mWander;
-          }
-          else errorCnt++;
-        }
+    if (curGrip == SERVO_G_CLOSE) 
+      if (digitalReadFast(IRB_F) == 0) {
+        mode = mDriveGoal;
       }
-
-      lastGrip = millis();
-      servoG.write(curGrip);
-    }
+      else {
+        if (errorCnt == errorThresh) {
+          errorCnt = 0;
+          gripState = gOpen;
+          removeCan(targetCan);
+          mode = mWander;
+        }
+        else errorCnt++;
+      }
     break;
 
   case mDriveGoal:
@@ -357,28 +358,17 @@ void loop() {
     else if (RobotBase.navDone()) {
       mode = mDropCan;
     }
+
     break;
 
   case mDropCan:
     if (newState) {
       celebrateGoal = true;
-      lastGrip = millis();
-      curGrip = SERVO_G_CLOSE;
+      gripState = gOpen;
       RobotBase.stop();
     }
-
-    if (millis() - lastGrip >= gripDelay) {
-      curGrip += gripStep;
-
-      if (curGrip >= SERVO_G_OPEN) {
-        curGrip = SERVO_G_OPEN;
-        mode = mBackup;
-        atGoal = true;
-      }
-
-      lastGrip = millis();
-
-      servoG.write(curGrip);
+    if (curGrip == SERVO_G_OPEN) {
+      mode = mBackup;
     }
     break;
 
@@ -398,8 +388,55 @@ void loop() {
   case mStop:
     RobotBase.stop();
     break;
-  }
-}
+
+  case mReset:
+    if (newState) {
+      RobotBase.stop();
+      curGrip = SERVO_G_OPEN;
+      servoG.write(curGrip);
+      targetCan = -1;
+      errorCnt = 0;
+    }
+    else if (RobotBase.navDone()) {
+      mode = mWander;
+    }
+    break;
+
+  case mEvadeRight:
+    if (newState) {
+      float relX = 30 * cos(-.35);
+      float relY = 30 * sin(-.35);
+      float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
+      float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
+      float destX = RobotBase.getX() + relXrotated;
+      float destY = RobotBase.getY() + relYrotated;
+      RobotBase.driveTo(destX,destY);
+      gripState = gClose;
+    }
+    else if (RobotBase.navDone()) {
+      mode = nextMode;
+    }
+    break;
+
+
+  case mEvadeLeft:
+    if (newState) {
+      float relX = 30 * cos(.35);
+      float relY = 30 * sin(.35);
+      float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
+      float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
+      float destX = RobotBase.getX() + relXrotated;
+      float destY = RobotBase.getY() + relYrotated;
+      RobotBase.driveTo(destX,destY);
+      gripState = gClose;
+    }
+    else if (RobotBase.navDone()) {
+      mode = nextMode;
+    }
+    break;
+
+  }  // close switch mode
+}  // close loop
 
 #define OBJ_MIN_WIDTH 4
 #define OBJ_MAX_WIDTH 14
@@ -610,6 +647,25 @@ void removeCan(int canIndex) {
   targetCan = -1;
 }
 
+void gripper() {
+  if (gripState == gClose) {
+    curGrip -= gripStep;
+
+    if (curGrip <= SERVO_G_CLOSE) {
+      curGrip = SERVO_G_CLOSE;
+    }
+  }
+  if (gripState == gOpen) {
+    curGrip += gripStep;
+
+    if (curGrip >= SERVO_G_OPEN) {
+      curGrip = SERVO_G_OPEN;
+    }
+  }
+
+  servoG.write(curGrip);
+}
+
 void celebrate() {
   switch (cCycle) {
   case 1:
@@ -668,25 +724,9 @@ void lcdInit() {
 }
 
 void bumperInit(){
-  pinMode(LED, OUTPUT);
   pinMode(IRB_FR, INPUT);
-  attachInterrupt(IRB_FR, bumperFR, CHANGE);
   pinMode(IRB_F, INPUT);
-  attachInterrupt(IRB_F, bumperF, CHANGE);
   pinMode(IRB_FL, INPUT);
-  attachInterrupt(IRB_FL, bumperFL, CHANGE);
-}
-
-void bumperFR() {
-  irbFR = !irbFR;
-}
-
-void bumperF() {
-  irbF = !irbF;
-}
-
-void bumperFL() {
-  irbFL = !irbFL;
 }
 
 void debugIr() {
@@ -718,6 +758,20 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
