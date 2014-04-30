@@ -199,7 +199,9 @@ void setup() {
   RobotBase.setAccel(50);
 
   //Set max velocity and turn rate
-  RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
+  //RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
+  RobotBase.setVelocityRange(20.0, 1.0, 0.01);
+  RobotBase.setTurnRange(2.0, 0.1, 0.001);
 
   //set motor output ranges - works both positive and negative
   //Max, dead zone, min

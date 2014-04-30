@@ -32,6 +32,9 @@ public:
 	void setMaxVel(const double& maxVelocity);
 	void setMaxTurn(const double& maxTurn);
 	
+	void setVelocityRange(int maxVel, int deadVel, int minVel);
+	void setTurnRange(int maxTurn, int deadTurn, int minTurn);
+	
 	void setOutputRange(int maxOut, int deadOut, int minOut);
 	
 	void setTicksPerUnit(const double& tpu);
@@ -86,10 +89,13 @@ private:
 	
 	int readIR(IR_Index ir);
 	
-	double _accel, _maxVel, _maxTurn;
+	double _accel;
 	
 	int _maxOut, _deadOut, _minOut;
 	
+	double _maxVel, _deadVel, _minVel;
+	double _maxTurn, _deadTurn, _minTurn;
+		
 	double _lastDistL, _lastDistR, _tpu;
 	double _dDistL, _dDistR, _width;
 	double _distSumL, _distSumR;

@@ -69,6 +69,18 @@ void CRobotBase::setOutputRange(int maxOut, int deadOut, int minOut) {
 	_deadOut = deadOut;
 	_minOut = minOut;
 }
+	
+void CRobotBase::setVelocityRange(int maxVel, int deadVel, int minVel) {
+	_maxVel = maxVel;
+	_deadVel = deadVel;
+	_minVel = minVel;
+}
+
+void CRobotBase::setTurnRange(int maxTurn, int deadTurn, int minTurn) {
+	_maxTurn = maxTurn;
+	_deadTurn = deadTurn;
+	_minTurn = minTurn;
+}
 
 void CRobotBase::setTicksPerUnit(const double& tpu) {
 	_tpu = tpu;
@@ -143,11 +155,18 @@ void CRobotBase::updateVelocity(double targetVel, double targetTurn, const doubl
 	//Serial.print(", ");
 	//Serial.println(targetTurn);
 	
-	if (targetTurn > _maxTurn) targetTurn = _maxTurn;
-	else if (targetTurn < -_maxTurn) targetTurn = -_maxTurn;
+	int signVel = sgn(targetVel);
+	int signTurn = sgn(targetTurn);
+	double absVel = abs(targetVel);
+	double absTurn = abs(targetTurn);
 	
-	if (targetVel > _maxVel) targetVel = _maxVel;
-	else if (targetVel < -_maxVel) targetVel = -_maxVel;
+	if (absVel < _deadVel) targetVel = 0;
+	else if (absVel < _minVel) targetVel = _minVel * signVel;
+	else if (absVel > _maxVel) targetVel = _maxVel * signVel;
+	
+	if (absTurn < _deadTurn) targetTurn = 0;
+	else if (absTurn < _minTurn) targetTurn = _minTurn * signTurn;
+	else if (absTurn > _maxTurn) targetTurn = _maxTurn * signTurn;
 	
 	double turn = 0.5 * _width * targetTurn;
 	double leftVel = targetVel - turn;
