@@ -150,6 +150,13 @@ struct SensorInfo {
 };
 SensorInfo sensors[IR_END];  
 
+struct wayPtsStruct {
+  Point pos;
+};
+const int wayPtsCnt = 2;
+wayPtsStruct wayPts[wayPtsCnt];
+int wayPt = 0;
+
 // Bumper flags
 volatile int irbFR = LOW;
 volatile int irbF  = LOW;
@@ -178,6 +185,25 @@ void setup() {
       cans[i].next = -1;
     }
   }
+
+  wayPts[0].pos.x = MAX_X;
+  wayPts[0].pos.y = 0;
+  wayPts[1].pos.x = MIN_X;
+  wayPts[1].pos.y = 0;
+  /*
+  wayPts[2].pos.x = MAX_X;
+   wayPts[2].pos.y = MAX_Y;
+   wayPts[3].pos.x = MIN_X;
+   wayPts[3].pos.y = MAX_Y;
+   wayPts[4].pos.x = MIN_X;
+   wayPts[4].pos.y = MIN_Y;
+   wayPts[5].pos.x = MAX_X;
+   wayPts[5].pos.y = MIN_Y;
+   wayPts[6].pos.x = MAX_X;
+   wayPts[6].pos.y = 0;
+   wayPts[7].pos.x = MIN_X;
+   wayPts[7].pos.y = 0;
+   */
 
   // Sensor offsets from robot center
   sensors[IRL].offset.x = 0;
@@ -304,12 +330,7 @@ void loop() {
     RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
     if (newState) {
       lcd.setBacklight(YELLOW);
-      int destX;
-
-      if (atGoal) destX = MIN_X + 5;
-      else destX = MAX_X - 10;
-
-      RobotBase.turnToAndDrive(destX, 0);
+      RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y);
     } 
     else {
       if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
@@ -319,7 +340,10 @@ void loop() {
         mode = mDriveCan;
       } 
       else if (RobotBase.navDone()) {
-        atGoal = !atGoal;
+        if (wayPt == wayPtsCnt - 1) {
+          wayPt = 0;
+        }
+        else  wayPt++;
         restart = true;
       }
     }
@@ -766,6 +790,7 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
 
 
 
