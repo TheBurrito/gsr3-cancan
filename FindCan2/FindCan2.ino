@@ -204,8 +204,8 @@ void setup() {
 
   //Set max velocity and turn rate
   //RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
-  RobotBase.setVelocityRange(20.0, 1.0, 0.01);
-  RobotBase.setTurnRange(2.0, 0.1, 0.001);
+  RobotBase.setVelocityRange(20.0, 2.0, 2.0);
+  RobotBase.setTurnRange(2.0, 0.1, 0.1);
 
   //set motor output ranges - works both positive and negative
   //Max, dead zone, min
@@ -251,22 +251,26 @@ void loop() {
     }
 
     if (digitalReadFast(IRB_FL) == 0) {
-      if (mode != mEvadeRight) nextMode = lastMode;
-      if (nextMode == mDriveCan) nextMode = mWander;
-      mode = mEvadeRight;
+      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
+        if (mode != mEvadeRight) nextMode = lastMode;
+        if (nextMode == mDriveCan) nextMode = mWander;
+        mode = mEvadeRight;
+      }
     }
-    else if (lastMode == mEvadeRight) {
-      mode = nextMode;
-    }
+    //    else if (lastMode == mEvadeRight) {
+    //      mode = nextMode;
+    //    }
 
     if (digitalReadFast(IRB_FR) == 0) {
-      if (mode != mEvadeLeft) nextMode = lastMode;
-      if (nextMode == mDriveCan) nextMode = mWander;
-      mode = mEvadeLeft;
+      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
+        if (mode != mEvadeLeft) nextMode = lastMode;
+        if (nextMode == mDriveCan) nextMode = mWander;
+        mode = mEvadeLeft;
+      }    
     }
-    else if (lastMode == mEvadeLeft) {
-      mode = nextMode;
-    }
+    //    else if (lastMode == mEvadeLeft) {
+    //      mode = nextMode;
+    //    }
   }
 
   newState = (lastMode != mode) || restart;
@@ -305,7 +309,7 @@ void loop() {
       if (atGoal) destX = MIN_X + 5;
       else destX = MAX_X - 10;
 
-      RobotBase.driveTo(destX, 0);
+      RobotBase.turnToAndDrive(destX, 0);
     } 
     else {
       if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
@@ -364,7 +368,6 @@ void loop() {
     else if (RobotBase.navDone()) {
       mode = mDropCan;
     }
-
     break;
 
   case mDropCan:
@@ -388,7 +391,6 @@ void loop() {
       RobotBase.stop();
       mode = mWander;
     }
-
     break;
 
   case mStop:
@@ -410,8 +412,8 @@ void loop() {
 
   case mEvadeRight:
     if (newState) {
-      float relX = 30 * cos(-.35);
-      float relY = 30 * sin(-.35);
+      float relX = 25 * cos(-.17);
+      float relY = 25 * sin(-.17);
       float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
       float destX = RobotBase.getX() + relXrotated;
@@ -427,8 +429,8 @@ void loop() {
 
   case mEvadeLeft:
     if (newState) {
-      float relX = 30 * cos(.35);
-      float relY = 30 * sin(.35);
+      float relX = 25 * cos(.17);
+      float relY = 25 * sin(.17);
       float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
       float destX = RobotBase.getX() + relXrotated;
@@ -764,6 +766,8 @@ void debugIr() {
   Serial.println(irRDist);
 #endif
 }
+
+
 
 
 
