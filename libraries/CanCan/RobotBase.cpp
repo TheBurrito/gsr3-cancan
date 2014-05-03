@@ -358,7 +358,7 @@ int CRobotBase::readIR(IR_Index ir) {
     		raw = analogRead(_irPins[ir]);
     		voltFromRaw = raw * 3.225806452;
 			val = 27.728 * pow(voltFromRaw / 1000, - 1.2045);
-			Serial.println(val);
+			//Serial.println(val);
     		if ( i == 0) {
     			sum = val;
     			min = val;

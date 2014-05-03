@@ -11,8 +11,14 @@
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
-#define DEBUG_DETECT_CAN false
-#define DEBUG_HEADING true
+#define DEBUG_DETECT_CAN true
+#define DEBUG_HEADING false
+
+//#define OBJ_MIN_WIDTH 4
+//#define OBJ_MAX_WIDTH 14
+
+int OBJ_MIN_WIDTH = 4;
+int OBJ_MAX_WIDTH = 8;
 
 
 LSM303 compass;
@@ -234,19 +240,19 @@ void setup() {
   RobotBase.setPID(10, 5, 0);
 
   //Set allowed accel for wheel velocity targets (cm/s/s)
-  RobotBase.setAccel(50);
+  RobotBase.setAccel(70);
 
   //Set max velocity and turn rate
   //RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
-  RobotBase.setVelocityRange(20.0, 2.0, 2.0);
-  RobotBase.setTurnRange(2.0, 0.1, 0.1);
+  RobotBase.setVelocityRange(20.0, 0.5, 2.0);
+  RobotBase.setTurnRange(2.0, 0.0000001, 0.4);
 
   //set motor output ranges - works both positive and negative
   //Max, dead zone, min
   // -deadZone > X < deadZone : X = 0
   // X < min : X = min
   // X > max : x = max
-  RobotBase.setOutputRange(350, 5, 60);
+  RobotBase.setOutputRange(350, 5, 70);
 
   //set ticks per desired distance unit
   RobotBase.setTicksPerUnit(71.65267); //units of cm
@@ -480,14 +486,11 @@ void loop() {
   }  // close switch mode
 }  // close loop
 
-#define OBJ_MIN_WIDTH 4
-#define OBJ_MAX_WIDTH 14
-
 void detectCan(int sensor, int curDist) {
   if (mode != mWander) return;
   if (sensor == IRF) return;  // don't try to detect cans by width with the front sensor
   bool edgeFound = false;
-  static int objDistThresh = 15;
+  static int objDistThresh = 10;
   int diff = curDist - obj[sensor].lastDist;
   obj[sensor].lastDist = curDist;
 
@@ -507,6 +510,7 @@ void detectCan(int sensor, int curDist) {
     float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
     float objX = RobotBase.getX() + relXrotated;
     float objY = RobotBase.getY() + relYrotated;
+       
 
     if (objX < MAX_X && objX > MIN_X && objY < MAX_Y && objY > MIN_Y) {
 
