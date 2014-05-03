@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include <LiquidTWI2.h>
 #include <Adafruit_RGBLCDShield.h>
+#include <LSM303.h>
 #include <Servo.h>
 #include <Pins.h>
 
@@ -11,6 +12,11 @@
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
 #define DEBUG_DETECT_CAN false
+#define DEBUG_HEADING true
+
+
+LSM303 compass;
+float headingOffset, adjHeading;
 
 Servo servoG; // define the Gripper Servo
 #define SERVO_G_CLOSE 36
@@ -37,6 +43,8 @@ TimedAction gripAction = TimedAction(20,gripper);
 TimedAction debugIrAction = TimedAction(1000,debugIr);
 TimedAction chooseCanAction = TimedAction(2000,chooseCan);
 TimedAction celebrateAction = TimedAction(150,celebrate);
+TimedAction compassAction = TimedAction(10,getHeading);
+TimedAction debugHeadingAction = TimedAction(500,debugHeading);
 
 LiquidTWI2 lcd(0);
 
@@ -256,6 +264,7 @@ void setup() {
   Serial.begin(115200);
   //  Serial.begin(9600);
   lcdInit();
+  compassInit();
   bumperInit();
   servoG.attach(SERVO_G);  // init gripper servo
   RobotBase.time();
@@ -263,15 +272,16 @@ void setup() {
 
 void loop() {
   RobotBase.update();
-
+  
+  compassAction.check();
   gripAction.check();
-
-  if (celebrateGoal) celebrateAction.check();
 
   if (mode != mWaitStart) {
     chooseCanAction.check();
     irAction.check();
+    debugHeadingAction.check();
 
+    if (celebrateGoal) celebrateAction.check();
     if (errorCnt > errorThresh) {
       mode = mReset;
     }
@@ -679,6 +689,16 @@ void removeCan(int canIndex) {
   targetCan = -1;
 }
 
+void getHeading() {  
+  compass.read();
+  adjHeading = compass.heading() - headingOffset;
+  if (adjHeading < 0) adjHeading += 360;
+  else if (adjHeading > 360) adjHeading -= 360;
+  
+  if (adjHeading < 180) adjHeading = -adjHeading;
+  else if (adjHeading > 180) adjHeading = -(adjHeading - 360);
+}
+
 void gripper() {
   if (gripState == gClose) {
     curGrip -= gripStep;
@@ -755,6 +775,26 @@ void lcdInit() {
   lcd.setBacklight(WHITE);
 }
 
+void compassInit () {  
+  compass.init();
+  compass.enableDefault();
+
+  /*
+      Calibration values obtained from running calibration example.
+  */
+  compass.m_min = (LSM303::vector<int16_t>){-398, -374, -489};
+  compass.m_max = (LSM303::vector<int16_t>){+240, +250, +0};
+  
+  float _heading = 0;
+  for (int i = 0; i < 100; i++) {
+    delay(10);
+    compass.read();
+    _heading = _heading + compass.heading();
+  }
+  headingOffset = _heading / 100;
+  
+}
+
 void bumperInit(){
   pinMode(IRB_FR, INPUT);
   pinMode(IRB_F, INPUT);
@@ -791,6 +831,25 @@ void debugIr() {
 #endif
 }
 
+void debugHeading() {
+#if DEBUG_HEADING
+#if DEBUG_USE_LCD
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Theta  : ");
+  lcd.print(RobotBase.getTheta() * 180 / PI);
+  lcd.setCursor(0,1);
+  lcd.print("Heading: ");
+  lcd.print(adjHeading);
+#endif
+#if DEBUG_USE_SERIAL
+  Serial.print("Theta  : ");
+  Serial.println(RobotBase.getTheta());
+  Serial.print("Heading: ");
+  Serial.println(adjHeading);
+#endif
+#endif
+}
 
 
 
