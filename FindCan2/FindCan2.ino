@@ -199,7 +199,7 @@ unsigned long lastLocal, curLocal;
 int localizeStep = 0;
 float ir[5];
 
-bool localize = true;
+bool doLocalize = true;
 
 bool localizeFailX = false;
 bool localizeFailY = false;
@@ -226,7 +226,7 @@ void checkBackup() {
   Serial.print(FIELDWIDTH);
   
   if (width > FIELDWIDTH - 1) {
-    if (localize) {
+    if (doLocalize) {
       mode = mLocalize;
     } else {
       mode = mWander;
