@@ -1,3 +1,10 @@
+
+#define DEBUG_USE_LCD true
+#define DEBUG_USE_SERIAL true
+#define DEBUG_IR false
+#define DEBUG_DETECT_CAN true
+#define DEBUG_HEADING false
+
 #include <Arduino.h>
 #include <RobotBase.h>
 #include <TimedAction.h>
@@ -7,12 +14,6 @@
 #include <LSM303.h>
 #include <Servo.h>
 #include <Pins.h>
-
-#define DEBUG_USE_LCD true
-#define DEBUG_USE_SERIAL false
-#define DEBUG_IR false
-#define DEBUG_DETECT_CAN true
-#define DEBUG_HEADING false
 
 int objMinWidth = 4;
 int objMaxWidth = 8;
@@ -813,16 +814,16 @@ void debugIr() {
   lcd.print(RobotBase.irDistance(IRR));
 #endif
 #if DEBUG_USE_SERIAL
-  Serial.print("Left       : ");
-  Serial.println(irLDist);
-  Serial.print("Front Left : ");  
-  Serial.println(irFLDist);
-  Serial.print("Front      : ");  
-  Serial.println(irFDist);
-  Serial.print("Front Right: ");  
-  Serial.println(irFRDist);
-  Serial.print("Right      : ");  
-  Serial.println(irRDist);
+  //Serial.print("Left       : ");
+  //Serial.println(irLDist);
+  //Serial.print("Front Left : ");  
+  //Serial.println(irFLDist);
+  //Serial.print("Front      : ");  
+  //Serial.println(irFDist);
+  //Serial.print("Front Right: ");  
+  //Serial.println(irFRDist);
+  //Serial.print("Right      : ");  
+  //Serial.println(irRDist);
 #endif
 }
 

@@ -321,7 +321,8 @@ void CRobotBase::update() {
 			} else if (_turning && abs(dTheta) < _thetaThresh) {
 				_turning = false;
 				if (_turnFirst) {
-					_turnFirst = false;
+					stop();
+					
 					_driving = true;
 					dX = 0;
 				}
@@ -339,8 +340,6 @@ void CRobotBase::update() {
 		} else if (_turning) {
 			targetVelocity = 0;
 			targetTurn = dTheta;
-		} else {
-			stop();
 		}
 		
 		dt = (curMillis - _lastNav) * 0.001;
