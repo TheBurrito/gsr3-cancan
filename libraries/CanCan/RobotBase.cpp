@@ -42,8 +42,14 @@ CRobotBase::CRobotBase() {
 	
 	_distSumL = 0;
 	_distSumR = 0;
+	
+	_theta = 0;
 	_posX = 0;
 	_posY = 0;
+	
+	_fixTheta = 0;
+	_fixX = 0;
+	_fixY = 0;
 }
 
 CRobotBase::~CRobotBase(){
@@ -96,15 +102,15 @@ void CRobotBase::reset() {
 }
 
 double CRobotBase::getTheta() {
-	return _theta;
+	return _theta + _fixTheta;
 }
 
 double CRobotBase::getX() {
-	return _posX;
+	return _posX + _fixX;
 }
 
 double CRobotBase::getY() {
-	return _posY;
+	return _posY + _fixY;
 }
 	
 void CRobotBase::setTheta(const double& theta) {
@@ -113,6 +119,10 @@ void CRobotBase::setTheta(const double& theta) {
 
 void CRobotBase::setY(const double& y) {
 	_posY = y;
+}
+
+void CRobotBase::setX(const double& x) {
+	_posX = x;
 }
 
 double CRobotBase::getVelocity() {
@@ -262,6 +272,35 @@ int CRobotBase::irDiff(IR_Index ir) {
 	return _irDist[ir] - _irPrevDist[ir];
 }
 
+bool CRobotBase::localizeWidth(float fieldWidth) {
+	int left = _irDist[IRL];
+	int right = _irDist[IRR];
+
+	if (left < 150 && right < 150) {
+		int width = right + left + 16;
+
+		if (width > fieldWidth - 5) {
+			float curTheta = getTheta();
+			
+			float c = fieldWidth / width;
+			float calcTheta = acos(c);
+			
+			if (abs(curTheta) > PI / 2) {
+				calcTheta += PI;
+				if (calcTheta > PI) calcTheta -= PI * 2;
+			}
+			
+			double calcY = (c * (right - left)) / 2;
+
+			_fixTheta = 0.1 * (calcTheta - _theta) + 0.9 * _fixTheta;
+			_fixY = 0.1 * (calcY - _posY) + 0.9 * _fixY;
+			return true;
+		}
+	}
+	
+	return false;
+}
+
 void CRobotBase::update() {
 	unsigned long curMillis = millis();
 	double dt;
@@ -289,8 +328,8 @@ void CRobotBase::update() {
 		double targetVelocity = 0, targetTurn = 0;
 		
 		if (_driving || _turning) {
-			dX = _navX - _posX;
-			dY = _navY - _posY;
+			dX = _navX - getX();
+			dY = _navY - getY();
 			double dist = hypot(dX, dY);
 			
 			if (_driving && dist < _navThresh) {
@@ -304,7 +343,7 @@ void CRobotBase::update() {
 				targetTheta = _navTheta;
 			}
 			
-			dTheta = targetTheta - _theta;
+			dTheta = targetTheta - getTheta();
 			
 			while (dTheta > PI) {
 				dTheta -= TWO_PI;

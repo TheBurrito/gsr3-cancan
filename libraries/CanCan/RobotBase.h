@@ -48,6 +48,8 @@ public:
 	void setIRSamples(int ir_samples);
 	void readAllIR();
 	
+	bool localizeWidth(float fieldWidth);
+	
 	int irDistance(IR_Index ir);
 	int irDiff(IR_Index ir);
 	
@@ -62,6 +64,7 @@ public:
 	
 	void setTheta(const double& theta);
 	void setY(const double& y);
+	void setX(const double& x);
 	
 	int getLeftOut();
 	int getRightOut();
@@ -107,6 +110,7 @@ private:
 	double _curVelL, _curVelR, _curVel;
 	
 	double _theta, _posX, _posY;
+	double _fixTheta, _fixX, _fixY;
 	
 	double _thetaAccel, _curTurn;
 	
