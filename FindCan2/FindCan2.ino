@@ -13,6 +13,7 @@
 #define DEBUG_IR false
 #define DEBUG_DETECT_CAN true
 #define DEBUG_HEADING false
+#define DEBUG_SONAR false
 
 int objMinWidth = 4;
 int objMaxWidth = 8;
@@ -169,6 +170,8 @@ int scanSpeed = 20;
 int goalSpeed = 45;
 int canSpeed = 35;
 
+float sonarDist;
+
 TimedAction irAction = TimedAction(40,readIrSensors); 
 TimedAction gripAction = TimedAction(gripDelay,gripper); 
 TimedAction debugIrAction = TimedAction(1000,debugIr);
@@ -176,6 +179,8 @@ TimedAction chooseCanAction = TimedAction(2000,chooseCan);
 TimedAction celebrateAction = TimedAction(150,celebrate);
 TimedAction compassAction = TimedAction(10,getHeading);
 TimedAction debugHeadingAction = TimedAction(500,debugHeading);
+TimedAction debugSonarAction = TimedAction(1000,debugSonar);
+TimedAction pingAction = TimedAction(200,ping);
 
 void setup() {
 
@@ -190,7 +195,7 @@ void setup() {
       cans[i].next = -1;
     }
   }
-
+/*
   wayPts[0].pos.x = MAX_X;
   wayPts[0].pos.y = 0;
   //  wayPts[1].pos.x = MIN_X;
@@ -207,7 +212,21 @@ void setup() {
   wayPts[5].pos.y = 0;
   wayPts[6].pos.x = MIN_X;
   wayPts[6].pos.y = 0;
-
+*/
+  wayPts[0].pos.x = 50;
+  wayPts[0].pos.y = 0;
+  wayPts[1].pos.x = 60;
+  wayPts[1].pos.y = 10;
+  wayPts[2].pos.x = 65;
+  wayPts[2].pos.y = 0;
+  wayPts[3].pos.x = 75;
+  wayPts[3].pos.y = -10;
+  wayPts[4].pos.x = 85;
+  wayPts[4].pos.y = 0;
+  wayPts[5].pos.x = 95;
+  wayPts[5].pos.y = 5;
+  wayPts[6].pos.x = 115;
+  wayPts[6].pos.y = 0;
 
   // Sensor offsets from robot center
   sensors[IRL].offset.x = 0;
@@ -258,9 +277,9 @@ void setup() {
   RobotBase.setIRSamples(1);
 
   Serial.begin(115200);
-  //  Serial.begin(9600);
   lcdInit();
   compassInit();
+  sonarInit();
   bumperInit();
   servoG.attach(SERVO_G);  // init gripper servo
   RobotBase.time();
@@ -275,6 +294,8 @@ void loop() {
   if (mode != mWaitStart) {
     chooseCanAction.check();
     irAction.check();
+    pingAction.check();
+    debugSonarAction.check();
     debugHeadingAction.check();
 
     if (celebrateGoal) celebrateAction.check();
@@ -688,6 +709,13 @@ void getHeading() {
   else if (adjHeading > 180) adjHeading = -(adjHeading - 360);
 }
 
+void ping() {
+  digitalWrite(SNR_RX, HIGH);
+  delayMicroseconds(20);
+  digitalWrite(SNR_RX, LOW);
+  sonarDist = pulseIn(SNR_PW, HIGH) / 147.0; 
+}
+
 void gripper() {
   if (gripState == gClose) {
     curGrip -= gripStep;
@@ -783,7 +811,11 @@ void compassInit () {
     _heading = _heading + compass.heading();
   }
   headingOffset = _heading / 100;
+}
 
+void sonarInit() {
+  pinMode(SNR_RX, OUTPUT);
+  pinMode(SNR_PW, INPUT);  
 }
 
 void bumperInit(){
@@ -842,7 +874,20 @@ void debugHeading() {
 #endif
 }
 
-
+void debugSonar() {
+#if DEBUG_SONAR
+#if DEBUG_USE_LCD
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Sonar: ");
+  lcd.print(sonarDist);
+#endif
+#if DEBUG_USE_SERIAL
+  Serial.print("Sonar:");
+  Serial.println(sonarDist);  
+#endif
+#endif
+}
 
 
 
