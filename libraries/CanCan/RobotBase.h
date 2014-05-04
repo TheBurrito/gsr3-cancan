@@ -59,6 +59,9 @@ public:
 	double getX();
 	double getY();
 	
+	void setTheta(const double& theta);
+	void setY(const double& y);
+	
 	int getLeftOut();
 	int getRightOut();
 	

@@ -106,6 +106,14 @@ double CRobotBase::getX() {
 double CRobotBase::getY() {
 	return _posY;
 }
+	
+void CRobotBase::setTheta(const double& theta) {
+	_theta = theta;
+}
+
+void CRobotBase::setY(const double& y) {
+	_posY = y;
+}
 
 int CRobotBase::getLeftOut() {
 	return _left;
@@ -326,6 +334,8 @@ void CRobotBase::update() {
 		} else if (_turning) {
 			targetVelocity = 0;
 			targetTurn = dTheta;
+		} else {
+			stop();
 		}
 		
 		dt = (curMillis - _lastNav) * 0.001;
@@ -505,6 +515,8 @@ void CRobotBase::stop() {
 	_turning = false;
 	_turnFirst = false;
 	_velocity = false;
+	_curVelL = 0;
+	_curVelR = 0;
 	reset();
 }
 
