@@ -136,6 +136,36 @@ double CRobotBase::getFixX() {
 double CRobotBase::getFixY() {
 	return _fixY;
 }
+	
+void CRobotBase::localizeX(const double& x) {
+	_fixX = x - _posX;
+}
+
+void CRobotBase::localizeY(const double& y) {
+	_fixY = y - _posY;
+}
+
+void CRobotBase::localizeTheta(const double& theta) {
+	_fixTheta = theta - _theta;
+}
+	
+void CRobotBase::setLocalization(const double& x, const double& y, const double& theta) {
+	_fixX = x - _posX;
+	_fixY = y - _posY;
+	_fixTheta = theta - _theta;
+}
+
+void CRobotBase::setFixX(const double& x) {
+	_fixX = x;
+}
+
+void CRobotBase::setFixY(const double& y) {
+	_fixY = y;
+}
+
+void CRobotBase::setFixTheta(const double& theta) {
+	_fixTheta = theta;
+}
 
 double CRobotBase::getVelocity() {
 	return _curVel;
@@ -292,48 +322,19 @@ int CRobotBase::irDistance(IR_Index ir) {
 	return _irDist[ir];
 }
 
-int CRobotBase::irDiff(IR_Index ir) {
-	return _irDist[ir] - _irPrevDist[ir];
+Point CRobotBase::obsPos(IR_Index ir, const Pose& pose) {
+	Point p;
+	p.x = _irDist[ir];
+	p.y = 0;
+	p = rotate(p, pose.angle);
+	p.x += pose.offset.x;
+	p.y += pose.offset.y;
+	
+	return p;
 }
 
-bool CRobotBase::localizeWidth(float fieldWidth) {
-	int left = _irDist[IRL];
-	int right = _irDist[IRR];
-
-	if (left < 150 && right < 150) {
-		int width = right + left + 16;
-		//Serial.print("W: ");
-		//Serial.print(width);
-
-		if (width > fieldWidth) {
-			float curTheta = getTheta();
-			
-			float c = fieldWidth / width;
-			float calcTheta = acos(c);
-			
-			if (abs(curTheta) > PI / 2) {
-				calcTheta += PI;
-				if (calcTheta > PI) calcTheta -= PI * 2;
-			}
-			
-			double calcY = (c * (right - left)) / 2;
-			
-			//Serial.print(" T: ");
-			//Serial.print(calcTheta);
-			//Serial.print(" Y: ");
-			//Serial.print(calcY);
-			
-			//Serial.println();
-
-			_fixTheta = 0.1 * (calcTheta - _theta) + 0.9 * _fixTheta;
-			_fixY = 0.1 * (calcY - _posY) + 0.9 * _fixY;
-			return true;
-		}
-		
-		//Serial.println();
-	}
-	
-	return false;
+int CRobotBase::irDiff(IR_Index ir) {
+	return _irDist[ir] - _irPrevDist[ir];
 }
 
 void CRobotBase::update() {

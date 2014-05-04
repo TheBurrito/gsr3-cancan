@@ -8,11 +8,13 @@
 #include <Servo.h>
 #include <Pins.h>
 
+#include <deque>
+
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
 #define DEBUG_DETECT_CAN false
-#define DEBUG_HEADING false
+#define DEBUG_HEADING true
 #define DEBUG_SONAR false
 
 int objMinWidth = 4;
@@ -25,11 +27,6 @@ Servo servoG; // define the Gripper Servo
 #define SERVO_G_CLOSE 36
 #define SERVO_G_OPEN  88
 int i;
-
-struct Point {
-  double x;
-  double y;
-};
 
 struct ObjInfo {
   Point start;
@@ -66,7 +63,7 @@ LiquidTWI2 lcd(0);
  2 - contigent arena size ?x?
  3 - home arena size 4'x8'
  */
-#define ARENA 3
+#define ARENA 1
 
 #if ARENA == 1 // ft * in/ft * cm/in
 #define ARENA_W 7
@@ -104,8 +101,10 @@ typedef enum {
   mDriveCan,
   mGrabCan,
   mDriveGoal,
+  mDriveInGoal,
   mDropCan,
   mBackup,
+  mLocalize,
   mStop,
   mReset,
   mEvadeRight,
@@ -147,11 +146,7 @@ bool firstCan = true;  // flag used for fist can we search for
 
 uint8_t buttons;
 
-struct SensorInfo {
-  float angle;
-  Point offset;
-};
-SensorInfo sensors[IR_END];  
+Pose sensors[IR_END];  
 
 struct wayPtsStruct {
   Point pos;
@@ -181,22 +176,135 @@ TimedAction compassAction = TimedAction(10,getHeading);
 TimedAction debugHeadingAction = TimedAction(500,debugHeading);
 TimedAction debugSonarAction = TimedAction(1000,debugSonar);
 TimedAction pingAction = TimedAction(200,ping);
-TimedAction localizeWidthAction = TimedAction(100, localizeWidth);
+TimedAction localizeAction = TimedAction(40, localize);
+TimedAction backupAction = TimedAction(40, checkBackup);
 
-bool localize = false;
+typedef enum {
+  lReset,
+  lRun,
+  lFinish
+} LocalizeState;
 
-void localizeWidth() {
-  if (localize) {
-    RobotBase.localizeWidth(121.92);
+LocalizeState localState = lReset;
+
+unsigned long lastLocal, curLocal;
+int localizeStep = 0;
+float ir[5];
+
+bool localize = true;
+
+bool localizeFailX = false;
+bool localizeFailY = false;
+bool localizeFailTheta = false;
+
+int localDist = 78;
+
+#define FIELDWIDTH (ARENA_W * 12 * 2.54)
+#define FIELDLENGTH (ARENA_L * 12 * 2.54)
+
+int backupCount = 0;
+
+void checkBackup() {
+  int left, right, width;
+  
+  left = RobotBase.irDistance(IRL);
+  right = RobotBase.irDistance(IRR);
+  
+  width = left + right + 16;
+  
+  Serial.print("Backup: ");
+  Serial.print(width);
+  Serial.print(" / ");
+  Serial.print(FIELDWIDTH);
+  
+  if (width > FIELDWIDTH - 1) {
+    if (localize) {
+      mode = mLocalize;
+    } else {
+      mode = mWander;
+    }
     
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("T: ");
-    lcd.print(RobotBase.getFixTheta());
-    lcd.setCursor(0,1);
-    lcd.print("Y: ");
-    lcd.print(RobotBase.getFixY());
+    RobotBase.stop(true);
   }
+}
+
+void localize() {
+  curLocal = millis();
+  int i;
+  float c, calcTheta, width, calcY, calcX = 0;
+  Point left, right;
+  
+  switch (localState) {
+    case lReset:
+      for (i = 0; i < 5; ++i) {
+        ir[i] = 0;
+      }
+      
+      localState = lRun;
+      
+      localizeStep = 0;
+      break;
+      
+    case lRun:
+      if (curLocal - 40 > lastLocal) {
+        lastLocal = curLocal;
+        ++localizeStep;
+        
+        for (i = 0; i < 5; ++i) {
+          ir[i] += RobotBase.irDistance((IR_Index)i);
+        }
+      }
+      break;
+      
+    case lFinish:
+      for (i = 0; i < 5; ++i) {
+        ir[i] /= localizeStep;
+      }
+      
+      if (ir[IRL] > 150 || ir[IRR] > 150) {
+        localizeFailY = true;
+        localizeFailTheta = true;
+      } else {
+        width = ir[IRL] + ir[IRR] + 16;
+        if (width > FIELDWIDTH) {          
+          c = FIELDWIDTH / width;
+          calcTheta = acos(c);
+          
+          calcY = (c * (ir[IRR] - ir[IRL])) / 2.0;
+          
+          RobotBase.localizeY(calcY);
+          RobotBase.localizeTheta(calcTheta);
+          
+          localizeFailY = false;
+          localizeFailTheta = false;
+        }
+        
+        if (ir[IRFL] < localDist) {
+          left = RobotBase.obsPos(IRFL, sensors[IRFL]);
+          left = rotate(left, RobotBase.getTheta());
+          calcX = FIELDLENGTH - left.x;
+        }
+        
+        if (ir[IRFR] < localDist) {
+          right = RobotBase.obsPos(IRFR, sensors[IRFR]);
+          right = rotate(right, RobotBase.getTheta());
+          
+          if (calcX == 0) {
+            calcX = (calcX + FIELDLENGTH - right.x) / 2.0;
+          } else {
+            calcX = FIELDLENGTH - right.x;
+          }
+        }
+        
+        if (calcX != 0) {
+          RobotBase.localizeX(calcX);
+          localizeFailX = false;
+        } else {
+          localizeFailX = true;
+        }
+      }
+      break;
+  }        
 }
 
 void setup() {
@@ -426,6 +534,18 @@ void loop() {
       lcd.setBacklight(GREEN);
       removeCan(targetCan);
       RobotBase.setMax(goalSpeed, 2.0); //cm/s, Rad/s
+      RobotBase.turnToAndDrive(GOAL_X - 40, GOAL_Y, false);
+    } 
+    else if (RobotBase.navDone()) {
+      mode = mDriveInGoal;
+    }
+    break;
+
+  case mDriveInGoal:
+    if (newState) {
+      lcd.setBacklight(GREEN);
+      removeCan(targetCan);
+      RobotBase.setMax(20, 2.0); //cm/s, Rad/s
       RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
     } 
     else if (RobotBase.navDone()) {
@@ -445,14 +565,27 @@ void loop() {
     break;
 
   case mBackup:
+    
     if (newState) {
       RobotBase.setVelocityAndTurn(-20.0, 0.0);
-      targetTime = millis() + 2000;
+    } else {
+      backupAction.check();     
     }
-
-    if (millis() >= targetTime) {
-      RobotBase.stop(false);
-      mode = mWander;
+    break;
+  
+  case mLocalize:
+    Serial.println(localizeStep);
+    if (newState) {
+      localState = lReset;
+      localize();
+      localizeAction.reset();
+    } else {
+      localizeAction.check();
+      if (localizeStep == 25) {
+        localState = lFinish;
+        localize();
+        mode = mWander;
+      }
     }
     break;
 
@@ -481,7 +614,7 @@ void loop() {
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
       double destX = RobotBase.getX() + relXrotated;
       double destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY, true);
+      RobotBase.driveTo(destX,destY, false);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -498,7 +631,7 @@ void loop() {
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
       float destX = RobotBase.getX() + relXrotated;
       float destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY, true);
+      RobotBase.driveTo(destX,destY, false);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {

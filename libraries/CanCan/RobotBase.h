@@ -2,6 +2,7 @@
 #define _RobotBase_h_
 
 #include "SimplePID.h"
+#include "Arduino.h"
 
 typedef enum {
   IRL,
@@ -19,6 +20,27 @@ typedef enum {
 	IR_1080,
 	IR_20150
 } IR_Model;
+
+struct Point {
+  double x;
+  double y;
+};
+
+struct Pose {
+  float angle;
+  Point offset;
+};
+
+inline Point rotate(const Point& p, const double& theta) {
+  double c = cos(theta);
+  double s = sin(theta);
+  Point n;
+
+  n.x = p.x * c - p.y * s;
+  n.y = p.x * s + p.y * c;
+  
+  return n;
+}
 
 class CRobotBase {
 public:
@@ -48,10 +70,9 @@ public:
 	void setIRSamples(int ir_samples);
 	void readAllIR();
 	
-	bool localizeWidth(float fieldWidth);
-	
 	int irDistance(IR_Index ir);
 	int irDiff(IR_Index ir);
+	Point obsPos(IR_Index ir, const Pose& pose);
 	
 	void update();
 	
@@ -64,6 +85,16 @@ public:
 	double getFixTheta();
 	double getFixX();
 	double getFixY();
+	
+	void setFixX(const double& x);
+	void setFixY(const double& y);
+	void setFixTheta(const double& theta);
+	
+	void localizeX(const double& x);
+	void localizeY(const double& y);
+	void localizeTheta(const double& theta);
+	
+	void setLocalization(const double& x, const double& y, const double& theta);
 	
 	double getVelocity();
 	
