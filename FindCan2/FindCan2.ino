@@ -330,7 +330,7 @@ void loop() {
     }
   }  // if !mWaitStart
 
-  newState = (lastMode != mode) || restart;
+    newState = (lastMode != mode) || restart;
   restart = false;
 
   lastMode = mode;
@@ -511,9 +511,17 @@ void loop() {
       RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
       RobotBase.turnToAndDrive(returnPos.pos.x, returnPos.pos.y, false);     
     }
-    else if (RobotBase.navDone()) {
-      returnPos.active = false;
-      mode = mWander;
+    else {
+      if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
+        mode = mDriveGoal;
+      }      
+      else if (targetCan != -1) {
+        mode = mDriveCan;
+      } 
+      else if (RobotBase.navDone()) {
+        returnPos.active = false;
+        mode = mWander;
+      }
     }
 
     break;
@@ -829,9 +837,9 @@ void compassInit () {
       Calibration values obtained from running calibration example.
    */
   compass.m_min = (LSM303::vector<int16_t>){
-    -398, -374, -489  };
+    -398, -374, -489    };
   compass.m_max = (LSM303::vector<int16_t>){
-    +240, +250, +0  };
+    +240, +250, +0    };
 
   float _heading = 0;
   for (int i = 0; i < 100; i++) {
@@ -917,6 +925,7 @@ void debugSonar() {
 #endif
 #endif
 }
+
 
 
 
