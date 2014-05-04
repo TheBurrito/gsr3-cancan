@@ -78,17 +78,17 @@ public:
 	void setPosThresh(const double& posThresh);
 	void setHeadingThresh(const double& thetaThresh);
 	
-	void driveTo(const double& x, const double& y);
-	void driveTo(const double& x, const double& y, const double& theta);
+	void driveTo(const double& x, const double& y, bool smooth);
+	void driveTo(const double& x, const double& y, const double& theta, bool smooth);
 	
-	void turnToAndDrive(const double& x, const double& y);
+	void turnToAndDrive(const double& x, const double& y, bool smooth);
 	
-	void turnTo(const double& theta);
-	void turnTo(const double& x, const double& y);
+	void turnTo(const double& theta, bool smooth);
+	void turnTo(const double& x, const double& y, bool smooth);
 	
 	void setVelocityAndTurn(const double& vel, const double& turn);
 	
-	void stop();
+	void stop(bool smooth);
 	
 	bool navDone();
 	

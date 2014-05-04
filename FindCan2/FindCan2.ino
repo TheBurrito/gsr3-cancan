@@ -311,7 +311,7 @@ void loop() {
   if (mode != mWaitStart) {
     chooseCanAction.check();
     irAction.check();
-    pingAction.check();
+    //pingAction.check();
     debugSonarAction.check();
     debugHeadingAction.check();
 
@@ -368,7 +368,7 @@ void loop() {
     if (newState) {
     RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
       lcd.setBacklight(YELLOW);
-      RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y);
+      RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y, false);
     } 
     else {
       if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
@@ -392,7 +392,7 @@ void loop() {
       lcd.setBacklight(TEAL);
       gripState = gOpen;
       RobotBase.setMax(canSpeed, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y);
+      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y, false);
     }
     else if (RobotBase.navDone()) {
       mode = mGrabCan;
@@ -403,7 +403,7 @@ void loop() {
     if (newState) {
       lcd.setBacklight(VIOLET);
       gripState = gClose;
-      RobotBase.stop();     
+      RobotBase.stop(false);     
     }
     if (curGrip == SERVO_G_CLOSE) {
       if (digitalReadFast(IRB_F) == 0) {
@@ -426,7 +426,7 @@ void loop() {
       lcd.setBacklight(GREEN);
       removeCan(targetCan);
       RobotBase.setMax(goalSpeed, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(GOAL_X, GOAL_Y);
+      RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
     } 
     else if (RobotBase.navDone()) {
       mode = mDropCan;
@@ -437,7 +437,7 @@ void loop() {
     if (newState) {
       celebrateGoal = true;
       gripState = gOpen;
-      RobotBase.stop();
+      RobotBase.stop(false);
     }
     if (curGrip == SERVO_G_OPEN) {
       mode = mBackup;
@@ -451,18 +451,18 @@ void loop() {
     }
 
     if (millis() >= targetTime) {
-      RobotBase.stop();
+      RobotBase.stop(false);
       mode = mWander;
     }
     break;
 
   case mStop:
-    RobotBase.stop();
+    RobotBase.stop(false);
     break;
 
   case mReset:
     if (newState) {
-      RobotBase.stop();
+      RobotBase.stop(false);
       curGrip = SERVO_G_OPEN;
       servoG.write(curGrip);
       targetCan = -1;
@@ -479,9 +479,9 @@ void loop() {
       float relY = 25 * sin(-.17);
       float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
-      float destX = RobotBase.getX() + relXrotated;
-      float destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY);
+      double destX = RobotBase.getX() + relXrotated;
+      double destY = RobotBase.getY() + relYrotated;
+      RobotBase.driveTo(destX,destY, true);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -498,7 +498,7 @@ void loop() {
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
       float destX = RobotBase.getX() + relXrotated;
       float destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY);
+      RobotBase.driveTo(destX,destY, true);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {

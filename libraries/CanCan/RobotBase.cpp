@@ -203,18 +203,16 @@ void CRobotBase::updateVelocity(double targetVel, double targetTurn, const doubl
 	else if (absVel < _minVel) targetVel = _minVel * signVel;
 	else if (absVel > _maxVel) targetVel = _maxVel * signVel;
 	
-	//if (targetVel < _deadVel) {
-		if (absTurn < _deadTurn) targetTurn = 0;
-		else if (absTurn < _minTurn) targetTurn = _minTurn * signTurn;
-		else if (absTurn > _maxTurn) targetTurn = _maxTurn * signTurn;
-	//}
+	if (absTurn < _deadTurn) targetTurn = 0;
+	else if (absTurn < _minTurn) targetTurn = _minTurn * signTurn;
+	else if (absTurn > _maxTurn) targetTurn = _maxTurn * signTurn;
 	
 	//Serial.print(" A: ");
 	//Serial.print(targetVel);
 	//Serial.print(", ");
 	//Serial.print(targetTurn);
 
-	Serial.println();
+	//Serial.println();
 	
 	double turn = 0.5 * _width * targetTurn;
 	double leftVel = targetVel - turn;
@@ -397,7 +395,7 @@ void CRobotBase::update() {
 			} else if (_turning && abs(dTheta) < _thetaThresh) {
 				_turning = false;
 				if (_turnFirst) {
-					stop();
+					stop(false);
 					_driving = true;
 					dX = 0;
 				}
@@ -416,7 +414,7 @@ void CRobotBase::update() {
 			targetVelocity = 0;
 			targetTurn = dTheta;
 		} else {
-			stop();
+			stop(false);
 		}
 		
 		dt = (curMillis - _lastNav) * 0.001;
@@ -427,7 +425,7 @@ void CRobotBase::update() {
 }
 	
 void CRobotBase::setVelocityAndTurn(const double& vel, const double& turn) {
-	stop();
+	stop(false);
 	
 	_targetVelocity = vel;
 	_targetTurn = turn;
@@ -544,8 +542,8 @@ void CRobotBase::setHeadingThresh(const double& thetaThresh) {
 	_thetaThresh = thetaThresh;
 }
 
-void CRobotBase::driveTo(const double& x, const double& y) {
-	stop();
+void CRobotBase::driveTo(const double& x, const double& y, bool smooth) {
+	stop(smooth);
 	
 	_navX = x;
 	_navY = y;
@@ -553,8 +551,8 @@ void CRobotBase::driveTo(const double& x, const double& y) {
 	_driving = true;
 }
 
-void CRobotBase::driveTo(const double& x, const double& y, const double& theta) {
-	stop();
+void CRobotBase::driveTo(const double& x, const double& y, const double& theta, bool smooth) {
+	stop(smooth);
 	
 	_navX = x;
 	_navY = y;
@@ -564,16 +562,16 @@ void CRobotBase::driveTo(const double& x, const double& y, const double& theta) 
 	_turning = true;
 }
 
-void CRobotBase::turnTo(const double& theta) {
-	stop();
+void CRobotBase::turnTo(const double& theta, bool smooth) {
+	stop(smooth);
 	
 	_navTheta = theta;
 	
 	_turning = true;
 }
 
-void CRobotBase::turnTo(const double& x, const double& y) {
-	stop();
+void CRobotBase::turnTo(const double& x, const double& y, bool smooth) {
+	stop(smooth);
 	
 	double dX = x - getX();
 	double dY = y - getY();
@@ -582,8 +580,8 @@ void CRobotBase::turnTo(const double& x, const double& y) {
 	_turning = true;
 }
 
-void CRobotBase::turnToAndDrive(const double& x, const double& y) {
-	turnTo(x, y);
+void CRobotBase::turnToAndDrive(const double& x, const double& y, bool smooth) {
+	turnTo(x, y, smooth);
 	
 	_navX = x;
 	_navY = y;
@@ -591,14 +589,17 @@ void CRobotBase::turnToAndDrive(const double& x, const double& y) {
 	_turnFirst = true;
 }
 
-void CRobotBase::stop() {
+void CRobotBase::stop(bool smooth) {
 	_driving = false;
 	_turning = false;
 	_turnFirst = false;
 	_velocity = false;
-	_curVelL = 0;
-	_curVelR = 0;
-	reset();
+	
+	if (!smooth) {
+		_curVelL = 0;
+		_curVelR = 0;
+		reset();
+	}
 }
 
 void CRobotBase::time() {
