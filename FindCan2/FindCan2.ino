@@ -14,12 +14,8 @@
 #define DEBUG_DETECT_CAN true
 #define DEBUG_HEADING false
 
-//#define OBJ_MIN_WIDTH 4
-//#define OBJ_MAX_WIDTH 14
-
-int OBJ_MIN_WIDTH = 4;
-int OBJ_MAX_WIDTH = 8;
-
+int objMinWidth = 4;
+int objMaxWidth = 8;
 
 LSM303 compass;
 float headingOffset, adjHeading;
@@ -43,14 +39,6 @@ struct ObjInfo {
 };
 
 ObjInfo obj[IR_END];
-
-TimedAction irAction = TimedAction(40,readIrSensors); 
-TimedAction gripAction = TimedAction(20,gripper); 
-TimedAction debugIrAction = TimedAction(1000,debugIr);
-TimedAction chooseCanAction = TimedAction(2000,chooseCan);
-TimedAction celebrateAction = TimedAction(150,celebrate);
-TimedAction compassAction = TimedAction(10,getHeading);
-TimedAction debugHeadingAction = TimedAction(500,debugHeading);
 
 LiquidTWI2 lcd(0);
 
@@ -104,7 +92,7 @@ LiquidTWI2 lcd(0);
 #define MAX_Y ARENA_W / 2 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
 #define MIN_X WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET 
 #define MIN_Y -ARENA_W / 2 * 12 * 2.54 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
-#define GOAL_X MAX_X
+#define GOAL_X MAX_X + 5
 #define GOAL_Y 0
 #endif
 
@@ -167,14 +155,9 @@ SensorInfo sensors[IR_END];
 struct wayPtsStruct {
   Point pos;
 };
-const int wayPtsCnt = 2;
+const int wayPtsCnt = 7;
 wayPtsStruct wayPts[wayPtsCnt];
 int wayPt = 0;
-
-// Bumper flags
-volatile int irbFR = LOW;
-volatile int irbF  = LOW;
-volatile int irbFL = LOW;
 
 // Attempt to prevent any infinite loops
 int errorThresh = 5;  
@@ -185,6 +168,14 @@ double dXcan, dYcan, dHcan;  // distance to can calculations
 int scanSpeed = 20;
 int goalSpeed = 45;
 int canSpeed = 35;
+
+TimedAction irAction = TimedAction(40,readIrSensors); 
+TimedAction gripAction = TimedAction(gripDelay,gripper); 
+TimedAction debugIrAction = TimedAction(1000,debugIr);
+TimedAction chooseCanAction = TimedAction(2000,chooseCan);
+TimedAction celebrateAction = TimedAction(150,celebrate);
+TimedAction compassAction = TimedAction(10,getHeading);
+TimedAction debugHeadingAction = TimedAction(500,debugHeading);
 
 void setup() {
 
@@ -202,22 +193,21 @@ void setup() {
 
   wayPts[0].pos.x = MAX_X;
   wayPts[0].pos.y = 0;
-  wayPts[1].pos.x = MIN_X;
-  wayPts[1].pos.y = 0;
-  /*
-  wayPts[2].pos.x = MAX_X;
+//  wayPts[1].pos.x = MIN_X;
+//  wayPts[1].pos.y = 0;  
+   wayPts[1].pos.x = MAX_X;
+   wayPts[1].pos.y = MAX_Y;
+   wayPts[2].pos.x = MIN_X;
    wayPts[2].pos.y = MAX_Y;
    wayPts[3].pos.x = MIN_X;
-   wayPts[3].pos.y = MAX_Y;
-   wayPts[4].pos.x = MIN_X;
+   wayPts[3].pos.y = MIN_Y;
+   wayPts[4].pos.x = MAX_X;
    wayPts[4].pos.y = MIN_Y;
    wayPts[5].pos.x = MAX_X;
-   wayPts[5].pos.y = MIN_Y;
-   wayPts[6].pos.x = MAX_X;
+   wayPts[5].pos.y = 0;
+   wayPts[6].pos.x = MIN_X;
    wayPts[6].pos.y = 0;
-   wayPts[7].pos.x = MIN_X;
-   wayPts[7].pos.y = 0;
-   */
+   
 
   // Sensor offsets from robot center
   sensors[IRL].offset.x = 0;
@@ -240,7 +230,7 @@ void setup() {
   RobotBase.setPID(10, 5, 0);
 
   //Set allowed accel for wheel velocity targets (cm/s/s)
-  RobotBase.setAccel(70);
+  RobotBase.setAccel(100);
 
   //Set max velocity and turn rate
   //RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
@@ -489,6 +479,7 @@ void loop() {
 void detectCan(int sensor, int curDist) {
   if (mode != mWander) return;
   if (sensor == IRF) return;  // don't try to detect cans by width with the front sensor
+  if (RobotBase.getVelocity() < 2.0) return; // don't detect cans if we'er not rolling forward
   bool edgeFound = false;
   static int objDistThresh = 10;
   int diff = curDist - obj[sensor].lastDist;
@@ -583,7 +574,7 @@ void detectCan(int sensor, int curDist) {
     double dY = obj[sensor].start.y - obj[sensor].last.y;
     obj[sensor].width = hypot(dX, dY);
 
-    if (obj[sensor].width > OBJ_MIN_WIDTH && obj[sensor].width < OBJ_MAX_WIDTH) {  // I think it's a can
+    if (obj[sensor].width > objMinWidth && obj[sensor].width < objMaxWidth) {  // I think it's a can
       float posX = (obj[sensor].start.x + obj[sensor].last.x) / 2;
       float posY = (obj[sensor].start.y + obj[sensor].last.y) / 2;
 #if DEBUG_DETECT_CAN   
