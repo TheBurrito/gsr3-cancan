@@ -58,6 +58,7 @@ public:
 	double getTheta();
 	double getX();
 	double getY();
+	double getVelocity();
 	
 	void setTheta(const double& theta);
 	void setY(const double& y);
@@ -103,7 +104,7 @@ private:
 	double _dDistL, _dDistR, _width;
 	double _distSumL, _distSumR;
 	
-	double _curVelL, _curVelR;
+	double _curVelL, _curVelR, _curVel;
 	
 	double _theta, _posX, _posY;
 	

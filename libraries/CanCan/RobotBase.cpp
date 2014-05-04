@@ -115,6 +115,10 @@ void CRobotBase::setY(const double& y) {
 	_posY = y;
 }
 
+double CRobotBase::getVelocity() {
+	return _curVel;
+}
+
 int CRobotBase::getLeftOut() {
 	return _left;
 }
@@ -193,6 +197,7 @@ void CRobotBase::updateVelocity(double targetVel, double targetTurn, const doubl
 	
 	_curVelL = leftVel;
 	_curVelR = rightVel;
+	_curVel = (_curVelL + _curVelR) / 2;
 	
 	_velL = _distSumL / dt;
 	_velR = _distSumR / dt;
