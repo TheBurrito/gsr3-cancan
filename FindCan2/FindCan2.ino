@@ -193,21 +193,21 @@ void setup() {
 
   wayPts[0].pos.x = MAX_X;
   wayPts[0].pos.y = 0;
-//  wayPts[1].pos.x = MIN_X;
-//  wayPts[1].pos.y = 0;  
-   wayPts[1].pos.x = MAX_X;
-   wayPts[1].pos.y = MAX_Y;
-   wayPts[2].pos.x = MIN_X;
-   wayPts[2].pos.y = MAX_Y;
-   wayPts[3].pos.x = MIN_X;
-   wayPts[3].pos.y = MIN_Y;
-   wayPts[4].pos.x = MAX_X;
-   wayPts[4].pos.y = MIN_Y;
-   wayPts[5].pos.x = MAX_X;
-   wayPts[5].pos.y = 0;
-   wayPts[6].pos.x = MIN_X;
-   wayPts[6].pos.y = 0;
-   
+  //  wayPts[1].pos.x = MIN_X;
+  //  wayPts[1].pos.y = 0;  
+  wayPts[1].pos.x = MAX_X;
+  wayPts[1].pos.y = MAX_Y;
+  wayPts[2].pos.x = MIN_X;
+  wayPts[2].pos.y = MAX_Y;
+  wayPts[3].pos.x = MIN_X;
+  wayPts[3].pos.y = MIN_Y;
+  wayPts[4].pos.x = MAX_X;
+  wayPts[4].pos.y = MIN_Y;
+  wayPts[5].pos.x = MAX_X;
+  wayPts[5].pos.y = 0;
+  wayPts[6].pos.x = MIN_X;
+  wayPts[6].pos.y = 0;
+
 
   // Sensor offsets from robot center
   sensors[IRL].offset.x = 0;
@@ -268,7 +268,7 @@ void setup() {
 
 void loop() {
   RobotBase.update();
-  
+
   compassAction.check();
   gripAction.check();
 
@@ -289,9 +289,6 @@ void loop() {
         mode = mEvadeRight;
       }
     }
-    //    else if (lastMode == mEvadeRight) {
-    //      mode = nextMode;
-    //    }
 
     if (digitalReadFast(IRB_FR) == 0) {
       if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
@@ -300,10 +297,7 @@ void loop() {
         mode = mEvadeLeft;
       }    
     }
-    //    else if (lastMode == mEvadeLeft) {
-    //      mode = nextMode;
-    //    }
-  }
+  }  // if !mWaitStart
 
   newState = (lastMode != mode) || restart;
   restart = false;
@@ -373,7 +367,7 @@ void loop() {
       gripState = gClose;
       RobotBase.stop();     
     }
-    if (curGrip == SERVO_G_CLOSE) 
+    if (curGrip == SERVO_G_CLOSE) {
       if (digitalReadFast(IRB_F) == 0) {
         mode = mDriveGoal;
       }
@@ -386,6 +380,7 @@ void loop() {
         }
         else errorCnt++;
       }
+    }
     break;
 
   case mDriveGoal:
@@ -501,7 +496,7 @@ void detectCan(int sensor, int curDist) {
     float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
     float objX = RobotBase.getX() + relXrotated;
     float objY = RobotBase.getY() + relYrotated;
-       
+
 
     if (objX < MAX_X && objX > MIN_X && objY < MAX_Y && objY > MIN_Y) {
 
@@ -653,7 +648,6 @@ void addCan(float x, float y) {
         }
       }
     }
-
   }
 
   if (!duplicate) {  // if the can is not a duplicate add it to the list
@@ -689,7 +683,7 @@ void getHeading() {
   adjHeading = compass.heading() - headingOffset;
   if (adjHeading < 0) adjHeading += 360;
   else if (adjHeading > 360) adjHeading -= 360;
-  
+
   if (adjHeading < 180) adjHeading = -adjHeading;
   else if (adjHeading > 180) adjHeading = -(adjHeading - 360);
 }
@@ -776,10 +770,12 @@ void compassInit () {
 
   /*
       Calibration values obtained from running calibration example.
-  */
-  compass.m_min = (LSM303::vector<int16_t>){-398, -374, -489};
-  compass.m_max = (LSM303::vector<int16_t>){+240, +250, +0};
-  
+   */
+  compass.m_min = (LSM303::vector<int16_t>){
+    -398, -374, -489  };
+  compass.m_max = (LSM303::vector<int16_t>){
+    +240, +250, +0  };
+
   float _heading = 0;
   for (int i = 0; i < 100; i++) {
     delay(10);
@@ -787,7 +783,7 @@ void compassInit () {
     _heading = _heading + compass.heading();
   }
   headingOffset = _heading / 100;
-  
+
 }
 
 void bumperInit(){
@@ -845,6 +841,7 @@ void debugHeading() {
 #endif
 #endif
 }
+
 
 
 
