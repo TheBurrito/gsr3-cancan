@@ -41,6 +41,13 @@ struct ObjInfo {
 
 ObjInfo obj[IR_END];
 
+struct ReturnPos {
+  bool active;
+  Point pos;
+};
+
+ReturnPos returnPos;
+
 LiquidTWI2 lcd(0);
 
 // These #defines make it easy to set the backlight color
@@ -66,7 +73,7 @@ LiquidTWI2 lcd(0);
  2 - contigent arena size ?x?
  3 - home arena size 4'x8'
  */
-#define ARENA 3
+#define ARENA 1
 
 #if ARENA == 1 // ft * in/ft * cm/in
 #define ARENA_W 7
@@ -109,7 +116,8 @@ typedef enum {
   mStop,
   mReset,
   mEvadeRight,
-  mEvadeLeft
+  mEvadeLeft,
+  mReturnToPos
 } 
 Mode;
 
@@ -180,7 +188,7 @@ TimedAction celebrateAction = TimedAction(150,celebrate);
 TimedAction compassAction = TimedAction(10,getHeading);
 TimedAction debugHeadingAction = TimedAction(500,debugHeading);
 TimedAction debugSonarAction = TimedAction(1000,debugSonar);
-TimedAction pingAction = TimedAction(200,ping);
+TimedAction pingAction = TimedAction(100,ping);
 TimedAction localizeWidthAction = TimedAction(100, localizeWidth);
 
 bool localize = false;
@@ -188,7 +196,7 @@ bool localize = false;
 void localizeWidth() {
   if (localize) {
     RobotBase.localizeWidth(121.92);
-    
+
     lcd.clear();
     lcd.setCursor(0,0);
     lcd.print("T: ");
@@ -218,33 +226,18 @@ void setup() {
   //  wayPts[1].pos.x = MIN_X;
   //  wayPts[1].pos.y = 0;  
   wayPts[1].pos.x = MAX_X;
-  wayPts[1].pos.y = MAX_Y;
+  wayPts[1].pos.y = MAX_Y / 2;
   wayPts[2].pos.x = MIN_X;
-  wayPts[2].pos.y = MAX_Y;
+  wayPts[2].pos.y = MAX_Y / 2;
   wayPts[3].pos.x = MIN_X;
-  wayPts[3].pos.y = MIN_Y;
+  wayPts[3].pos.y = MIN_Y /2;
   wayPts[4].pos.x = MAX_X;
-  wayPts[4].pos.y = MIN_Y;
+  wayPts[4].pos.y = MIN_Y / 2;
   wayPts[5].pos.x = MAX_X;
   wayPts[5].pos.y = 0;
   wayPts[6].pos.x = MIN_X;
   wayPts[6].pos.y = 0;
-/*
-  wayPts[0].pos.x = 50;
-  wayPts[0].pos.y = 0;
-  wayPts[1].pos.x = 60;
-  wayPts[1].pos.y = 10;
-  wayPts[2].pos.x = 65;
-  wayPts[2].pos.y = 0;
-  wayPts[3].pos.x = 75;
-  wayPts[3].pos.y = -10;
-  wayPts[4].pos.x = 85;
-  wayPts[4].pos.y = 0;
-  wayPts[5].pos.x = 95;
-  wayPts[5].pos.y = 5;
-  wayPts[6].pos.x = 115;
-  wayPts[6].pos.y = 0;
-*/
+
   // Sensor offsets from robot center
   sensors[IRL].offset.x = 0;
   sensors[IRL].offset.y = 8.0;
@@ -311,7 +304,7 @@ void loop() {
   if (mode != mWaitStart) {
     chooseCanAction.check();
     irAction.check();
-    //pingAction.check();
+    pingAction.check();
     debugSonarAction.check();
     debugHeadingAction.check();
 
@@ -366,7 +359,7 @@ void loop() {
 
   case mWander:
     if (newState) {
-    RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
+      RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
       lcd.setBacklight(YELLOW);
       RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y, false);
     } 
@@ -375,6 +368,11 @@ void loop() {
         mode = mDriveGoal;
       }      
       else if (targetCan != -1) {
+        if (!returnPos.active) {
+          returnPos.active = true;
+          returnPos.pos.x = RobotBase.getX();
+          returnPos.pos.y = RobotBase.getY();
+        }
         mode = mDriveCan;
       } 
       else if (RobotBase.navDone()) {
@@ -414,7 +412,8 @@ void loop() {
           errorCnt = 0;
           gripState = gOpen;
           removeCan(targetCan);
-          mode = mWander;
+          if (returnPos.active) mode = mReturnToPos;
+          else mode = mWander;
         }
         else errorCnt++;
       }
@@ -452,7 +451,8 @@ void loop() {
 
     if (millis() >= targetTime) {
       RobotBase.stop(false);
-      mode = mWander;
+      if (returnPos.active) mode = mReturnToPos;
+      else mode = mWander;
     }
     break;
 
@@ -506,11 +506,23 @@ void loop() {
     }
     break;
 
+  case mReturnToPos:
+    if (newState) {
+      RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
+      RobotBase.turnToAndDrive(returnPos.pos.x, returnPos.pos.y, false);     
+    }
+    else if (RobotBase.navDone()) {
+      returnPos.active = false;
+      mode = mWander;
+    }
+
+    break;
+
   }  // close switch mode
 }  // close loop
 
 void detectCan(int sensor, int curDist) {
-  if (mode != mWander) return;
+  if (mode != mWander && mode != mReturnToPos) return;
   if (sensor == IRF) return;  // don't try to detect cans by width with the front sensor
   if (RobotBase.getVelocity() < 2.0) return; // don't detect cans if we'er not rolling forward
   bool edgeFound = false;
@@ -730,7 +742,7 @@ void ping() {
   digitalWrite(SNR_RX, HIGH);
   delayMicroseconds(20);
   digitalWrite(SNR_RX, LOW);
-  sonarDist = pulseIn(SNR_PW, HIGH) / 147.0; 
+  //sonarDist = pulseIn(SNR_PW, HIGH) / 147.0; 
 }
 
 void gripper() {
