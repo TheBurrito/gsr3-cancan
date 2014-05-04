@@ -76,13 +76,13 @@ void CRobotBase::setOutputRange(int maxOut, int deadOut, int minOut) {
 	_minOut = minOut;
 }
 	
-void CRobotBase::setVelocityRange(int maxVel, int deadVel, int minVel) {
+void CRobotBase::setVelocityRange(double maxVel, double deadVel, double minVel) {
 	_maxVel = maxVel;
 	_deadVel = deadVel;
 	_minVel = minVel;
 }
 
-void CRobotBase::setTurnRange(int maxTurn, int deadTurn, int minTurn) {
+void CRobotBase::setTurnRange(double maxTurn, double deadTurn, double minTurn) {
 	_maxTurn = maxTurn;
 	_deadTurn = deadTurn;
 	_minTurn = minTurn;
@@ -123,6 +123,18 @@ void CRobotBase::setY(const double& y) {
 
 void CRobotBase::setX(const double& x) {
 	_posX = x;
+}
+	
+double CRobotBase::getFixTheta() {
+	return _fixTheta;
+}
+
+double CRobotBase::getFixX() {
+	return _fixX;
+}
+
+double CRobotBase::getFixY() {
+	return _fixY;
 }
 
 double CRobotBase::getVelocity() {
@@ -175,20 +187,34 @@ void CRobotBase::updateVelocity(double targetVel, double targetTurn, const doubl
 	//Serial.print("T: ");
 	//Serial.print(targetVel);
 	//Serial.print(", ");
-	//Serial.println(targetTurn);
+	//Serial.print(targetTurn);
 	
 	int signVel = sgn(targetVel);
 	int signTurn = sgn(targetTurn);
 	double absVel = abs(targetVel);
 	double absTurn = abs(targetTurn);
 	
+	//Serial.print(" MIN: ");
+	//Serial.print(_minVel);
+	//Serial.print(", ");
+	//Serial.print(_minTurn);
+	
 	if (absVel < _deadVel) targetVel = 0;
 	else if (absVel < _minVel) targetVel = _minVel * signVel;
 	else if (absVel > _maxVel) targetVel = _maxVel * signVel;
 	
-	if (absTurn < _deadTurn) targetTurn = 0;
-	else if (absTurn < _minTurn) targetTurn = _minTurn * signTurn;
-	else if (absTurn > _maxTurn) targetTurn = _maxTurn * signTurn;
+	//if (targetVel < _deadVel) {
+		if (absTurn < _deadTurn) targetTurn = 0;
+		else if (absTurn < _minTurn) targetTurn = _minTurn * signTurn;
+		else if (absTurn > _maxTurn) targetTurn = _maxTurn * signTurn;
+	//}
+	
+	//Serial.print(" A: ");
+	//Serial.print(targetVel);
+	//Serial.print(", ");
+	//Serial.print(targetTurn);
+
+	Serial.println();
 	
 	double turn = 0.5 * _width * targetTurn;
 	double leftVel = targetVel - turn;
@@ -278,8 +304,10 @@ bool CRobotBase::localizeWidth(float fieldWidth) {
 
 	if (left < 150 && right < 150) {
 		int width = right + left + 16;
+		//Serial.print("W: ");
+		//Serial.print(width);
 
-		if (width > fieldWidth - 5) {
+		if (width > fieldWidth) {
 			float curTheta = getTheta();
 			
 			float c = fieldWidth / width;
@@ -291,11 +319,20 @@ bool CRobotBase::localizeWidth(float fieldWidth) {
 			}
 			
 			double calcY = (c * (right - left)) / 2;
+			
+			//Serial.print(" T: ");
+			//Serial.print(calcTheta);
+			//Serial.print(" Y: ");
+			//Serial.print(calcY);
+			
+			//Serial.println();
 
 			_fixTheta = 0.1 * (calcTheta - _theta) + 0.9 * _fixTheta;
 			_fixY = 0.1 * (calcY - _posY) + 0.9 * _fixY;
 			return true;
 		}
+		
+		//Serial.println();
 	}
 	
 	return false;
@@ -360,7 +397,7 @@ void CRobotBase::update() {
 			} else if (_turning && abs(dTheta) < _thetaThresh) {
 				_turning = false;
 				if (_turnFirst) {
-					_turnFirst = false;
+					stop();
 					_driving = true;
 					dX = 0;
 				}
@@ -538,8 +575,8 @@ void CRobotBase::turnTo(const double& theta) {
 void CRobotBase::turnTo(const double& x, const double& y) {
 	stop();
 	
-	double dX = x - _posX;
-	double dY = y - _posY;
+	double dX = x - getX();
+	double dY = y - getY();
 	_navTheta = atan2(dY, dX);
 	
 	_turning = true;

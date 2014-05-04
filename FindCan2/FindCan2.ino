@@ -11,7 +11,7 @@
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
-#define DEBUG_DETECT_CAN true
+#define DEBUG_DETECT_CAN false
 #define DEBUG_HEADING false
 #define DEBUG_SONAR false
 
@@ -181,6 +181,23 @@ TimedAction compassAction = TimedAction(10,getHeading);
 TimedAction debugHeadingAction = TimedAction(500,debugHeading);
 TimedAction debugSonarAction = TimedAction(1000,debugSonar);
 TimedAction pingAction = TimedAction(200,ping);
+TimedAction localizeWidthAction = TimedAction(100, localizeWidth);
+
+bool localize = false;
+
+void localizeWidth() {
+  if (localize) {
+    RobotBase.localizeWidth(121.92);
+    
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("T: ");
+    lcd.print(RobotBase.getFixTheta());
+    lcd.setCursor(0,1);
+    lcd.print("Y: ");
+    lcd.print(RobotBase.getFixY());
+  }
+}
 
 void setup() {
 
@@ -195,7 +212,7 @@ void setup() {
       cans[i].next = -1;
     }
   }
-/*
+
   wayPts[0].pos.x = MAX_X;
   wayPts[0].pos.y = 0;
   //  wayPts[1].pos.x = MIN_X;
@@ -212,7 +229,7 @@ void setup() {
   wayPts[5].pos.y = 0;
   wayPts[6].pos.x = MIN_X;
   wayPts[6].pos.y = 0;
-*/
+/*
   wayPts[0].pos.x = 50;
   wayPts[0].pos.y = 0;
   wayPts[1].pos.x = 60;
@@ -227,7 +244,7 @@ void setup() {
   wayPts[5].pos.y = 5;
   wayPts[6].pos.x = 115;
   wayPts[6].pos.y = 0;
-
+*/
   // Sensor offsets from robot center
   sensors[IRL].offset.x = 0;
   sensors[IRL].offset.y = 8.0;
@@ -249,12 +266,12 @@ void setup() {
   RobotBase.setPID(10, 5, 0);
 
   //Set allowed accel for wheel velocity targets (cm/s/s)
-  RobotBase.setAccel(100);
+  RobotBase.setAccel(50);
 
   //Set max velocity and turn rate
   //RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
-  RobotBase.setVelocityRange(20.0, 0.5, 2.0);
-  RobotBase.setTurnRange(2.0, 0.0000001, 0.4);
+  RobotBase.setVelocityRange(20.0, 0, 1.0);
+  RobotBase.setTurnRange(2.0, 0.01, 0.2);
 
   //set motor output ranges - works both positive and negative
   //Max, dead zone, min
@@ -348,8 +365,8 @@ void loop() {
     break;
 
   case mWander:
-    RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
     if (newState) {
+    RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
       lcd.setBacklight(YELLOW);
       RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y);
     } 

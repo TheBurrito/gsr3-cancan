@@ -32,8 +32,8 @@ public:
 	void setMaxVel(const double& maxVelocity);
 	void setMaxTurn(const double& maxTurn);
 	
-	void setVelocityRange(int maxVel, int deadVel, int minVel);
-	void setTurnRange(int maxTurn, int deadTurn, int minTurn);
+	void setVelocityRange(double maxVel, double deadVel, double minVel);
+	void setTurnRange(double maxTurn, double deadTurn, double minTurn);
 	
 	void setOutputRange(int maxOut, int deadOut, int minOut);
 	
@@ -60,6 +60,11 @@ public:
 	double getTheta();
 	double getX();
 	double getY();
+	
+	double getFixTheta();
+	double getFixX();
+	double getFixY();
+	
 	double getVelocity();
 	
 	void setTheta(const double& theta);
