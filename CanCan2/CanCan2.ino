@@ -7,17 +7,20 @@
 #include <LSM303.h>
 #include <Servo.h>
 #include <Pins.h>
-#include <CircularBuffer.h>
 
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
-#define DEBUG_DETECT_CAN false
+#define DEBUG_DETECT_CAN true
 #define DEBUG_HEADING false
-#define DEBUG_SONAR false
 
-int objMinWidth = 4;
-int objMaxWidth = 8;
+//#define OBJ_MIN_WIDTH 4
+//#define OBJ_MAX_WIDTH 14
+
+int OBJ_MIN_WIDTH = 4;
+int OBJ_MAX_WIDTH = 8;
+
+#define USE_COMPASS true
 
 LSM303 compass;
 float headingOffset, adjHeading;
@@ -26,6 +29,11 @@ Servo servoG; // define the Gripper Servo
 #define SERVO_G_CLOSE 36
 #define SERVO_G_OPEN  88
 int i;
+
+struct Point {
+  double x;
+  double y;
+};
 
 struct ObjInfo {
   Point start;
@@ -37,12 +45,13 @@ struct ObjInfo {
 
 ObjInfo obj[IR_END];
 
-struct ReturnPos {
-  bool active;
-  Point pos;
-};
-
-ReturnPos returnPos;
+TimedAction irAction = TimedAction(40,readIrSensors); 
+TimedAction gripAction = TimedAction(20,gripper); 
+TimedAction debugIrAction = TimedAction(1000,debugIr);
+TimedAction chooseCanAction = TimedAction(2000,chooseCan);
+TimedAction celebrateAction = TimedAction(150,celebrate);
+TimedAction compassAction = TimedAction(10,getHeading);
+TimedAction debugHeadingAction = TimedAction(500,debugHeading);
 
 LiquidTWI2 lcd(0);
 
@@ -96,7 +105,7 @@ LiquidTWI2 lcd(0);
 #define MAX_Y ARENA_W / 2 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
 #define MIN_X WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET 
 #define MIN_Y -ARENA_W / 2 * 12 * 2.54 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
-#define GOAL_X MAX_X + 5
+#define GOAL_X MAX_X
 #define GOAL_Y 0
 #endif
 
@@ -107,22 +116,27 @@ typedef enum {
   mDriveCan,
   mGrabCan,
   mDriveGoal,
-  mDriveInGoal,
   mDropCan,
   mBackup,
-  mLocalize,
   mStop,
   mReset,
   mEvadeRight,
   mEvadeLeft,
-  mReturnToPos
+  mLocalizeY,
+  mLocalizeX,
+  mLocalizeBoth
 } 
 Mode;
 
-struct NavPoint {
-  Point p;
-  Mode m;
-};
+typedef enum {
+  yDriveToCenterLine,
+  yTurnToGoal,
+  yCheckWidth,
+  yDrive
+} 
+LocalizationY;
+
+LocalizationY yState;
 
 typedef enum {
   gOpen,
@@ -132,7 +146,7 @@ GripState;
 
 GripState gripState = gOpen;
 
-Mode mode = mWaitStart, lastMode = mode, nextMode;
+Mode mode = mLocalizeY, lastMode = mode, nextMode;
 
 bool newState = true, restart = false;
 
@@ -158,16 +172,23 @@ bool firstCan = true;  // flag used for fist can we search for
 
 uint8_t buttons;
 
-Pose sensors[IR_END];  
+struct SensorInfo {
+  float angle;
+  Point offset;
+};
+SensorInfo sensors[IR_END];  
 
 struct wayPtsStruct {
   Point pos;
 };
-const int wayPtsCnt = 7;
+const int wayPtsCnt = 2;
 wayPtsStruct wayPts[wayPtsCnt];
 int wayPt = 0;
 
-CircularBuffer<NavPoint> path;
+// Bumper flags
+volatile int irbFR = LOW;
+volatile int irbF  = LOW;
+volatile int irbFL = LOW;
 
 // Attempt to prevent any infinite loops
 int errorThresh = 5;  
@@ -179,205 +200,11 @@ int scanSpeed = 20;
 int goalSpeed = 45;
 int canSpeed = 35;
 
-float sonarDist;
+void setup() {
 
-TimedAction irAction = TimedAction(40,readIrSensors); 
-TimedAction gripAction = TimedAction(gripDelay,gripper); 
-TimedAction debugIrAction = TimedAction(1000,debugIr);
-TimedAction chooseCanAction = TimedAction(2000,chooseCan);
-TimedAction celebrateAction = TimedAction(150,celebrate);
-TimedAction compassAction = TimedAction(10,getHeading);
-TimedAction debugHeadingAction = TimedAction(500,debugHeading);
-TimedAction debugSonarAction = TimedAction(1000,debugSonar);
-TimedAction pingAction = TimedAction(200,ping);
-TimedAction localizeAction = TimedAction(40, localize);
-TimedAction backupAction = TimedAction(40, checkBackup);
-TimedAction obstacleAction = TimedAction(40, checkObstacles);
-
-typedef enum {
-  lReset,
-  lRun,
-  lFinish
-} 
-LocalizeState;
-
-LocalizeState localState = lReset;
-
-unsigned long lastLocal, curLocal;
-int localizeStep = 0;
-float ir[5];
-
-bool doLocalize = true;
-
-bool localizeFailX = false;
-bool localizeFailY = false;
-bool localizeFailTheta = false;
-
-int localDist = 78;
-
-#define FIELDWIDTH (ARENA_W * 12 * 2.54)
-#define FIELDLENGTH (ARENA_L * 12 * 2.54)
-
-int backupCount = 0;
-
-void checkObstacles() {
-    /*if (digitalReadFast(IRB_FL) == 0) {
-      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
-        if (mode != mEvadeRight)  {
-          nextMode = mode;
-          if (nextMode == mDriveCan) nextMode = mWander;
-          mode = mEvadeRight;
-        }
-      }
-    }
-
-    if (digitalReadFast(IRB_FR) == 0) {
-      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
-        if (mode != mEvadeLeft) nextMode = mode;
-        if (nextMode == mDriveCan) nextMode = mWander;
-        mode = mEvadeLeft;
-      }    
-    }*/
-  
-  switch (mode) {
-    case mDriveCan:
-    
-    case mWander:
-    
-}
-
-void setLCD(char *s) {
-  //lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print(s);
-}
-
-void fillPath() {
-  path.reset();
-  NavPoint np;
-  for (int i = 0; i < wayPtsCnt; ++i) {
-    np.p.x = wayPts[i].pos.x;
-    np.p.y = wayPts[i].pos.y;
-    np.m = mWander;
-    path.pushBack(p);
+  for (int i = 0; i < IR_END; i++) {
+    obj[i].active = false;
   }
-}
-
-void checkBackup() {
-  int left, right, width;
-
-  left = RobotBase.irDistance(IRL);
-  right = RobotBase.irDistance(IRR);
-
-  width = left + right + 16;
-
-  Serial.print("Backup: ");
-  Serial.print(width);
-  Serial.print(" / ");
-  Serial.print(FIELDWIDTH);
-
-  if (left > 150 || right > 150) {
-    Serial.println(" **");
-    return;
-  }
-  Serial.println();
-
-  if (width > FIELDWIDTH - 1) {
-    if (doLocalize) {
-      mode = mLocalize;
-    } 
-    else {
-      mode = mWander;
-    }
-
-    RobotBase.stop(true);
-  }
-}
-
-void localize() {
-  curLocal = millis();
-  int i;
-  float c, calcTheta, width, calcY, calcX = 0;
-  Point left, right;
-
-  switch (localState) {
-  case lReset:
-    for (i = 0; i < 5; ++i) {
-      ir[i] = 0;
-    }
-
-    localState = lRun;
-
-    localizeStep = 0;
-    break;
-
-  case lRun:
-    if (curLocal - 40 > lastLocal) {
-      lastLocal = curLocal;
-      ++localizeStep;
-
-      for (i = 0; i < 5; ++i) {
-        ir[i] += RobotBase.irDistance((IR_Index)i);
-      }
-    }
-    break;
-
-  case lFinish:
-    for (i = 0; i < 5; ++i) {
-      ir[i] /= localizeStep;
-    }
-
-    if (ir[IRL] > 150 || ir[IRR] > 150) {
-      localizeFailY = true;
-      localizeFailTheta = true;
-    } 
-    else {
-      width = ir[IRL] + ir[IRR] + 16;
-      if (width > FIELDWIDTH) {          
-        c = FIELDWIDTH / width;
-        calcTheta = acos(c);
-
-        calcY = (c * (ir[IRR] - ir[IRL])) / 2.0;
-
-        RobotBase.localizeY(calcY);
-        RobotBase.localizeTheta(calcTheta);
-
-        localizeFailY = false;
-        localizeFailTheta = false;
-      }
-
-      if (ir[IRFL] < localDist) {
-        left = RobotBase.obsPos(IRFL, sensors[IRFL]);
-        left = rotate(left, RobotBase.getTheta());
-        calcX = FIELDLENGTH - left.x;
-      }
-
-      if (ir[IRFR] < localDist) {
-        right = RobotBase.obsPos(IRFR, sensors[IRFR]);
-        right = rotate(right, RobotBase.getTheta());
-
-        if (calcX == 0) {
-          calcX = (calcX + FIELDLENGTH - right.x) / 2.0;
-        } 
-        else {
-          calcX = FIELDLENGTH - right.x;
-        }
-      }
-
-      if (calcX != 0) {
-        RobotBase.localizeX(calcX);
-        localizeFailX = false;
-      } 
-      else {
-        localizeFailX = true;
-      }
-    }
-    break;
-  }        
-}
-
-void initCans() {
-  nextCan = 0;
 
   for (int i = 0; i < canCapacity; i++) {
     cans[i].next = i + 1;
@@ -386,34 +213,25 @@ void initCans() {
       cans[i].next = -1;
     }
   }
-}
-
-void setup() {
-
-  for (int i = 0; i < IR_END; i++) {
-    obj[i].active = false;
-  }
-
-  initCans();
 
   wayPts[0].pos.x = MAX_X;
   wayPts[0].pos.y = 0;
-  //  wayPts[1].pos.x = MIN_X;
-  //  wayPts[1].pos.y = 0;  
-  wayPts[1].pos.x = MAX_X;
-  wayPts[1].pos.y = MAX_Y / 2;
-  wayPts[2].pos.x = MIN_X;
-  wayPts[2].pos.y = MAX_Y / 2;
-  wayPts[3].pos.x = MIN_X;
-  wayPts[3].pos.y = MIN_Y /2;
-  wayPts[4].pos.x = MAX_X;
-  wayPts[4].pos.y = MIN_Y / 2;
-  wayPts[5].pos.x = MAX_X;
-  wayPts[5].pos.y = 0;
-  wayPts[6].pos.x = MIN_X;
-  wayPts[6].pos.y = 0;
-
-  fillPath();
+  wayPts[1].pos.x = MIN_X;
+  wayPts[1].pos.y = 0;
+  /*
+  wayPts[2].pos.x = MAX_X;
+   wayPts[2].pos.y = MAX_Y;
+   wayPts[3].pos.x = MIN_X;
+   wayPts[3].pos.y = MAX_Y;
+   wayPts[4].pos.x = MIN_X;
+   wayPts[4].pos.y = MIN_Y;
+   wayPts[5].pos.x = MAX_X;
+   wayPts[5].pos.y = MIN_Y;
+   wayPts[6].pos.x = MAX_X;
+   wayPts[6].pos.y = 0;
+   wayPts[7].pos.x = MIN_X;
+   wayPts[7].pos.y = 0;
+   */
 
   // Sensor offsets from robot center
   sensors[IRL].offset.x = 0;
@@ -436,12 +254,12 @@ void setup() {
   RobotBase.setPID(10, 5, 0);
 
   //Set allowed accel for wheel velocity targets (cm/s/s)
-  RobotBase.setAccel(50);
+  RobotBase.setAccel(70);
 
   //Set max velocity and turn rate
   //RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
-  RobotBase.setVelocityRange(20.0, 0, 1.0);
-  RobotBase.setTurnRange(2.0, 0.01, 0.2);
+  RobotBase.setVelocityRange(20.0, 0.5, 2.0);
+  RobotBase.setTurnRange(2.0, 0.0000001, 0.4);
 
   //set motor output ranges - works both positive and negative
   //Max, dead zone, min
@@ -464,45 +282,155 @@ void setup() {
   RobotBase.setIRSamples(1);
 
   Serial.begin(115200);
-  Serial1.begin(115200);
-
+  //  Serial.begin(9600);
   lcdInit();
   compassInit();
-  sonarInit();
   bumperInit();
   servoG.attach(SERVO_G);  // init gripper servo
   RobotBase.time();
 }
 
+void checkWidth() {
+  int left = RobotBase.irDistance(IRL);
+  int right = RobotBase.irDistance(IRR);
+
+  if (left > 150 || right > 150) {
+    yState = yDrive;
+  } 
+  else {
+
+    int width = right + left;
+    if (width > MAX_Y - MIN_Y - 5) {
+      //TODO: determine position and true angle
+      float fieldWidth = MAX_Y - MIN_Y;
+      float c = fieldWidth / width;
+      float calcTheta = acos(c);
+      double calcY = (c * (right - left)) / 2;
+
+#if DEBUG_USE_SERIAL
+      Serial.print("Width: ");
+      Serial.print(width);
+      Serial.print(" CalcTheta: ");
+      Serial.print(calcTheta);
+      Serial.print(" Y: ");
+      Serial.print(calcY);
+      
+      Serial.println();
+#endif
+
+      RobotBase.setTheta(calcTheta);
+      RobotBase.setY(calcY);
+    } 
+    else {
+      //Can't see both walls
+      //yState = yDrive;
+    }
+  }
+}
+
+void turnToGoal() {
+#if USE_COMPASS
+  float radHeading = adjHeading * PI / 180.0;
+  float targetHeading = adjHeading - RobotBase.getTheta();
+  RobotBase.turnTo(targetHeading);
+#else
+  RobotBase.turnTo(GOAL_X, GOAL_Y);
+#endif
+}
+
+void localizeYState(bool newState) {
+  if (newState) {
+    yState = yDriveToCenterLine;
+  }
+
+  static LocalizationY lastState;
+  newState = (lastState != yState);
+  lastState = yState;
+
+  switch (yState) {
+  case yDriveToCenterLine:
+    if (newState) {
+      RobotBase.turnToAndDrive(RobotBase.getX(), 0);
+    } 
+    else if (RobotBase.navDone()) {
+      yState = yTurnToGoal;
+    }
+
+    break;
+
+  case yTurnToGoal:
+    if (newState) {
+      turnToGoal();
+    } 
+    else if (RobotBase.navDone()) {
+      yState = yCheckWidth;
+    }
+    break;
+
+  case yCheckWidth:
+    checkWidth();
+    break;
+
+  case yDrive:
+    if (newState) {
+      RobotBase.driveTo(RobotBase.getX() + 10, 0);
+    } 
+    else if (RobotBase.navDone()) {
+      yState = yTurnToGoal;
+    }
+    break;
+  }
+}
+
 void loop() {
-  //setLCD("update");
   RobotBase.update();
 
   compassAction.check();
-
   gripAction.check();
 
   if (mode != mWaitStart) {
     chooseCanAction.check();
     irAction.check();
-    pingAction.check();
-    debugSonarAction.check();
     debugHeadingAction.check();
 
     if (celebrateGoal) celebrateAction.check();
     if (errorCnt > errorThresh) {
       mode = mReset;
     }
-    obstacleAction.check();
-    
-  }  // if !mWaitStart
 
-    newState = (lastMode != mode) || restart;
+    if (digitalReadFast(IRB_FL) == 0) {
+      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
+        if (mode != mEvadeRight) nextMode = lastMode;
+        if (nextMode == mDriveCan) nextMode = mWander;
+        mode = mEvadeRight;
+      }
+    }
+    //    else if (lastMode == mEvadeRight) {
+    //      mode = nextMode;
+    //    }
+
+    if (digitalReadFast(IRB_FR) == 0) {
+      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
+        if (mode != mEvadeLeft) nextMode = lastMode;
+        if (nextMode == mDriveCan) nextMode = mWander;
+        mode = mEvadeLeft;
+      }    
+    }
+    //    else if (lastMode == mEvadeLeft) {
+    //      mode = nextMode;
+    //    }
+  }
+
+  newState = (lastMode != mode) || restart;
   restart = false;
 
   lastMode = mode;
 
   switch (mode) {
+  case mLocalizeY:
+    localizeYState(newState);
+    break;
+
   case mWaitStart:
     debugIrAction.check();
     buttons = lcd.readButtons();
@@ -525,36 +453,23 @@ void loop() {
     break;
 
   case mWander:
+    RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
     if (newState) {
-      RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
       lcd.setBacklight(YELLOW);
-      if (path.empty()) {
-        fillPath();
-      }
-      //RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y, false);
-
-      RobotBase.turnToAndDrive(path[0].x, path[0].y, false);
+      RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y);
     } 
     else {
       if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
         mode = mDriveGoal;
       }      
       else if (targetCan != -1) {
-        if (!returnPos.active) {
-          returnPos.active = true;
-          Point p = {
-            RobotBase.getX(), RobotBase.getY()          };
-          path.insertFront(p);
-        }
         mode = mDriveCan;
       } 
       else if (RobotBase.navDone()) {
-        /*if (wayPt == wayPtsCnt - 1) {
-         wayPt = 0;
-         }
-         else  wayPt++;*/
-        path.removeFront();
-
+        if (wayPt == wayPtsCnt - 1) {
+          wayPt = 0;
+        }
+        else  wayPt++;
         restart = true;
       }
     }
@@ -565,7 +480,7 @@ void loop() {
       lcd.setBacklight(TEAL);
       gripState = gOpen;
       RobotBase.setMax(canSpeed, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y, false);
+      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y);
     }
     else if (RobotBase.navDone()) {
       mode = mGrabCan;
@@ -576,9 +491,9 @@ void loop() {
     if (newState) {
       lcd.setBacklight(VIOLET);
       gripState = gClose;
-      RobotBase.stop(false);     
+      RobotBase.stop();     
     }
-    if (curGrip == SERVO_G_CLOSE) {
+    if (curGrip == SERVO_G_CLOSE) 
       if (digitalReadFast(IRB_F) == 0) {
         mode = mDriveGoal;
       }
@@ -587,32 +502,18 @@ void loop() {
           errorCnt = 0;
           gripState = gOpen;
           removeCan(targetCan);
-          if (returnPos.active) mode = mReturnToPos;
-          else mode = mWander;
+          mode = mWander;
         }
         else errorCnt++;
       }
-    }
     break;
 
   case mDriveGoal:
     if (newState) {
       lcd.setBacklight(GREEN);
-      //removeCan(targetCan);
-      RobotBase.setMax(goalSpeed, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(GOAL_X - 40, GOAL_Y, false);
-    } 
-    else if (RobotBase.navDone()) {
-      mode = mDriveInGoal;
-    }
-    break;
-
-  case mDriveInGoal:
-    if (newState) {
-      lcd.setBacklight(GREEN);
       removeCan(targetCan);
-      RobotBase.setMax(20, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
+      RobotBase.setMax(goalSpeed, 2.0); //cm/s, Rad/s
+      RobotBase.turnToAndDrive(GOAL_X, GOAL_Y);
     } 
     else if (RobotBase.navDone()) {
       mode = mDropCan;
@@ -623,7 +524,7 @@ void loop() {
     if (newState) {
       celebrateGoal = true;
       gripState = gOpen;
-      RobotBase.stop(false);
+      RobotBase.stop();
     }
     if (curGrip == SERVO_G_OPEN) {
       mode = mBackup;
@@ -633,36 +534,22 @@ void loop() {
   case mBackup:
     if (newState) {
       RobotBase.setVelocityAndTurn(-20.0, 0.0);
-    } 
-    else {
-      backupAction.check();     
+      targetTime = millis() + 2000;
     }
-    break;
 
-  case mLocalize:
-    if (newState) {
-      localState = lReset;
-      localize();
-      localizeAction.reset();
-    } 
-    else {
-      localizeAction.check();
-      if (localizeStep == 25) {
-        localState = lFinish;
-        localize();
-        if (returnPos.active) mode = mReturnToPos;
-        else mode = mWander;
-      }
+    if (millis() >= targetTime) {
+      RobotBase.stop();
+      mode = mWander;
     }
     break;
 
   case mStop:
-    RobotBase.stop(false);
+    RobotBase.stop();
     break;
 
   case mReset:
     if (newState) {
-      RobotBase.stop(false);
+      RobotBase.stop();
       curGrip = SERVO_G_OPEN;
       servoG.write(curGrip);
       targetCan = -1;
@@ -679,9 +566,9 @@ void loop() {
       float relY = 25 * sin(-.17);
       float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
-      Point p = {
-        RobotBase.getX() + relXrotated, RobotBase.getY() + relYrotated      };
-      RobotBase.driveTo(destX,destY, false);
+      float destX = RobotBase.getX() + relXrotated;
+      float destY = RobotBase.getY() + relYrotated;
+      RobotBase.driveTo(destX,destY);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -698,7 +585,7 @@ void loop() {
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
       float destX = RobotBase.getX() + relXrotated;
       float destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY, false);
+      RobotBase.driveTo(destX,destY);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -706,35 +593,12 @@ void loop() {
     }
     break;
 
-  case mReturnToPos:
-    if (newState) {
-      RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(returnPos.pos.x, returnPos.pos.y, false);     
-    }
-    else {
-      if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
-        mode = mDriveGoal;
-      }      
-      else if (targetCan != -1) {
-        mode = mDriveCan;
-      } 
-      else if (RobotBase.navDone()) {
-        returnPos.active = false;
-        mode = mWander;
-      }
-    }
-
-    break;
-
   }  // close switch mode
 }  // close loop
 
 void detectCan(int sensor, int curDist) {
-  setLCD("d");
-
-  if (mode != mWander && mode != mReturnToPos) return;
+  if (mode != mWander) return;
   if (sensor == IRF) return;  // don't try to detect cans by width with the front sensor
-  if (RobotBase.getVelocity() < 2.0) return; // don't detect cans if we'er not rolling forward
   bool edgeFound = false;
   static int objDistThresh = 10;
   int diff = curDist - obj[sensor].lastDist;
@@ -829,7 +693,7 @@ void detectCan(int sensor, int curDist) {
     double dY = obj[sensor].start.y - obj[sensor].last.y;
     obj[sensor].width = hypot(dX, dY);
 
-    if (obj[sensor].width > objMinWidth && obj[sensor].width < objMaxWidth) {  // I think it's a can
+    if (obj[sensor].width > OBJ_MIN_WIDTH && obj[sensor].width < OBJ_MAX_WIDTH) {  // I think it's a can
       float posX = (obj[sensor].start.x + obj[sensor].last.x) / 2;
       float posY = (obj[sensor].start.y + obj[sensor].last.y) / 2;
 #if DEBUG_DETECT_CAN   
@@ -867,17 +731,13 @@ void resetCanDetection(int sensor) {
 }
 
 void chooseCan() {
-  setLCD("c");
-
   float dist = 1000;
   if (targetCan == -1) {
-    double x = RobotBase.getX();
-    double y = RobotBase.getY();
     for (int i = 0; i < canCapacity; i++) {
       if (cans[i].ts != 0) {
         if (firstCan) {
-          float dX = cans[i].pos.x - x;
-          float dY = cans[i].pos.y - y;
+          float dX = cans[i].pos.x - RobotBase.getX();
+          float dY = cans[i].pos.y - RobotBase.getY();
           float _dist = hypot(dX,dY);
           if (_dist < dist) {
             dist = _dist;
@@ -897,54 +757,46 @@ void chooseCan() {
 }
 
 void readIrSensors() {
-  setLCD("r");
-
   for (int i = 0; i < IR_END; ++i) {
     detectCan(i, RobotBase.irDistance((IR_Index)i));
   }
 }
 
 void addCan(float x, float y) {
-  lcd.setCursor(0,0);
-  lcd.print(nextCan);
-
+  bool duplicate = false;  // prevent duplicate cans in the list
   for (int i = 0; i < canCapacity; i++) {
-    if (cans[i].ts != 0 && fabs(cans[i].pos.x - x) < 10 && fabs(cans[i].pos.y - y) < 10) {
-      return;
+    if (!duplicate) {
+      if (cans[i].ts != 0) {
+        if (fabs(cans[i].pos.x - x) < 10 && fabs(cans[i].pos.y - y) < 10) {
+          duplicate = true;
+        }
+      }
     }
+
   }
 
-  double dX = GOAL_X - x;
-  double dY = GOAL_Y - y;
-  double distToGoal = hypot(dX,dY);
+  if (!duplicate) {  // if the can is not a duplicate add it to the list
+    double dX = GOAL_X - x;
+    double dY = GOAL_Y - y;
+    double distToGoal = hypot(dX,dY);
 
-  cans[nextCan].ts = millis();  
-  cans[nextCan].pos.x = x;
-  cans[nextCan].pos.y = y;
-  cans[nextCan].distToGoal = distToGoal;
-  nextCan = cans[nextCan].next;
-  if (nextCan < 0 || nextCan >= canCapacity) {  // our can capacity is full clear out an old one
-    lcd.setBacklight(RED);
-    int a = 0;
-    int b = 3 / a;
+    cans[nextCan].ts = millis();  
+    cans[nextCan].pos.x = x;
+    cans[nextCan].pos.y = y;
+    cans[nextCan].distToGoal = distToGoal;
+    nextCan = cans[nextCan].next;
+    if (nextCan == -1) {  // our can capacity is full clear out an old one
+      // ToDo: write a function that searches for oldest timestamp
+    }
   }
   else {
 #if DEBUG_DETECT_CAN       
     Serial.println("** Discard Duplicate Can **");
 #endif
   }
-  setLCD("A");
 }
 
 void removeCan(int canIndex) {
-  setLCD("r");
-
-  if (canIndex == -1) {
-    lcd.setBacklight(RED);
-    int a = 0;
-    int b = 3 / a;
-  }
-
   cans[canIndex].ts = 0;
   cans[canIndex].next = nextCan;
   nextCan = canIndex;
@@ -952,27 +804,16 @@ void removeCan(int canIndex) {
 }
 
 void getHeading() {  
-  setLCD("h");
+  compass.read();
+  adjHeading = compass.heading() - headingOffset;
+  if (adjHeading < 0) adjHeading += 360;
+  else if (adjHeading > 360) adjHeading -= 360;
 
-  /*compass.read();
-   adjHeading = compass.heading() - headingOffset;
-   if (adjHeading < 0) adjHeading += 360;
-   else if (adjHeading > 360) adjHeading -= 360;
-   
-   if (adjHeading < 180) adjHeading = -adjHeading;
-   else if (adjHeading > 180) adjHeading = -(adjHeading - 360);*/
-}
-
-void ping() {
-  digitalWrite(SNR_RX, HIGH);
-  delayMicroseconds(20);
-  digitalWrite(SNR_RX, LOW);
-  //sonarDist = pulseIn(SNR_PW, HIGH) / 147.0; 
+  if (adjHeading < 180) adjHeading = -adjHeading;
+  else if (adjHeading > 180) adjHeading = -(adjHeading - 360);
 }
 
 void gripper() {
-  setLCD("g");
-
   if (gripState == gClose) {
     curGrip -= gripStep;
 
@@ -1056,9 +897,9 @@ void compassInit () {
       Calibration values obtained from running calibration example.
    */
   compass.m_min = (LSM303::vector<int16_t>){
-    -398, -374, -489          };
+    -398, -374, -489        };
   compass.m_max = (LSM303::vector<int16_t>){
-    +240, +250, +0          };
+    +240, +250, +0        };
 
   float _heading = 0;
   for (int i = 0; i < 100; i++) {
@@ -1067,11 +908,7 @@ void compassInit () {
     _heading = _heading + compass.heading();
   }
   headingOffset = _heading / 100;
-}
 
-void sonarInit() {
-  pinMode(SNR_RX, OUTPUT);
-  pinMode(SNR_PW, INPUT);  
 }
 
 void bumperInit(){
@@ -1130,20 +967,6 @@ void debugHeading() {
 #endif
 }
 
-void debugSonar() {
-#if DEBUG_SONAR
-#if DEBUG_USE_LCD
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Sonar: ");
-  lcd.print(sonarDist);
-#endif
-#if DEBUG_USE_SERIAL
-  Serial.print("Sonar:");
-  Serial.println(sonarDist);  
-#endif
-#endif
-}
 
 
 

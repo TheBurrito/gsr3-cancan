@@ -182,6 +182,7 @@ int CRobotBase::getRightOut() {
 double forward;
 
 void CRobotBase::updateOdometry(const long& encL, const long& encR, const double& dt) {
+	
 	double distL = encL / _tpu;
 	double distR = encR / _tpu;
 	
@@ -326,9 +327,9 @@ Point CRobotBase::obsPos(IR_Index ir, const Pose& pose) {
 	Point p;
 	p.x = _irDist[ir];
 	p.y = 0;
-	p = rotate(p, pose.angle);
-	p.x += pose.offset.x;
-	p.y += pose.offset.y;
+	p = rotate(p, pose.a);
+	p.x += pose.p.x;
+	p.y += pose.p.y;
 	
 	return p;
 }
@@ -338,6 +339,7 @@ int CRobotBase::irDiff(IR_Index ir) {
 }
 
 void CRobotBase::update() {
+	
 	unsigned long curMillis = millis();
 	double dt;
 	
@@ -422,7 +424,7 @@ void CRobotBase::update() {
 		updateVelocity(targetVelocity, targetTurn, dt);
 		
 		_lastNav = curMillis;
-	}				
+	}		
 }
 	
 void CRobotBase::setVelocityAndTurn(const double& vel, const double& turn) {
