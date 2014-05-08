@@ -7,14 +7,15 @@
 #include <LSM303.h>
 #include <Servo.h>
 #include <Pins.h>
-#include <CircularBuffer.h>
+
+#include <deque>
 
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
 #define DEBUG_DETECT_CAN false
 #define DEBUG_HEADING false
-#define DEBUG_SONAR false
+#define DEBUG_SONAR true
 
 int objMinWidth = 4;
 int objMaxWidth = 8;
@@ -119,11 +120,6 @@ typedef enum {
 } 
 Mode;
 
-struct NavPoint {
-  Point p;
-  Mode m;
-};
-
 typedef enum {
   gOpen,
   gClose
@@ -167,8 +163,6 @@ const int wayPtsCnt = 7;
 wayPtsStruct wayPts[wayPtsCnt];
 int wayPt = 0;
 
-CircularBuffer<NavPoint> path;
-
 // Attempt to prevent any infinite loops
 int errorThresh = 5;  
 int errorCnt = 0;
@@ -179,7 +173,9 @@ int scanSpeed = 20;
 int goalSpeed = 45;
 int canSpeed = 35;
 
-float sonarDist;
+// Sonar start and end times in micros
+volatile long pulseStart, pulseEnd;
+volatile int sonarDist;
 
 TimedAction irAction = TimedAction(40,readIrSensors); 
 TimedAction gripAction = TimedAction(gripDelay,gripper); 
@@ -192,7 +188,6 @@ TimedAction debugSonarAction = TimedAction(1000,debugSonar);
 TimedAction pingAction = TimedAction(200,ping);
 TimedAction localizeAction = TimedAction(40, localize);
 TimedAction backupAction = TimedAction(40, checkBackup);
-TimedAction obstacleAction = TimedAction(40, checkObstacles);
 
 typedef enum {
   lReset,
@@ -207,7 +202,7 @@ unsigned long lastLocal, curLocal;
 int localizeStep = 0;
 float ir[5];
 
-bool doLocalize = true;
+bool doLocalize = false;
 
 bool localizeFailX = false;
 bool localizeFailY = false;
@@ -413,8 +408,6 @@ void setup() {
   wayPts[6].pos.x = MIN_X;
   wayPts[6].pos.y = 0;
 
-  fillPath();
-
   // Sensor offsets from robot center
   sensors[IRL].offset.x = 0;
   sensors[IRL].offset.y = 8.0;
@@ -464,8 +457,6 @@ void setup() {
   RobotBase.setIRSamples(1);
 
   Serial.begin(115200);
-  Serial1.begin(115200);
-
   lcdInit();
   compassInit();
   sonarInit();
@@ -475,17 +466,15 @@ void setup() {
 }
 
 void loop() {
-  //setLCD("update");
   RobotBase.update();
 
   compassAction.check();
-
   gripAction.check();
 
   if (mode != mWaitStart) {
     chooseCanAction.check();
     irAction.check();
-    pingAction.check();
+    pingAction.check();   
     debugSonarAction.check();
     debugHeadingAction.check();
 
@@ -493,8 +482,22 @@ void loop() {
     if (errorCnt > errorThresh) {
       mode = mReset;
     }
-    obstacleAction.check();
-    
+
+    if (digitalReadFast(IRB_FL) == 0) {
+      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
+        if (mode != mEvadeRight) nextMode = lastMode;
+        if (nextMode == mDriveCan) nextMode = mWander;
+        mode = mEvadeRight;
+      }
+    }
+
+    if (digitalReadFast(IRB_FR) == 0) {
+      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
+        if (mode != mEvadeLeft) nextMode = lastMode;
+        if (nextMode == mDriveCan) nextMode = mWander;
+        mode = mEvadeLeft;
+      }    
+    }
   }  // if !mWaitStart
 
     newState = (lastMode != mode) || restart;
@@ -528,33 +531,25 @@ void loop() {
     if (newState) {
       RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
       lcd.setBacklight(YELLOW);
-      if (path.empty()) {
-        fillPath();
-      }
-      //RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y, false);
-
-      RobotBase.turnToAndDrive(path[0].x, path[0].y, false);
+      RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y, false);
     } 
     else {
-      if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
+      if (digitalRead(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
         mode = mDriveGoal;
       }      
       else if (targetCan != -1) {
         if (!returnPos.active) {
           returnPos.active = true;
-          Point p = {
-            RobotBase.getX(), RobotBase.getY()          };
-          path.insertFront(p);
+          returnPos.pos.x = RobotBase.getX();
+          returnPos.pos.y = RobotBase.getY();
         }
         mode = mDriveCan;
       } 
       else if (RobotBase.navDone()) {
-        /*if (wayPt == wayPtsCnt - 1) {
-         wayPt = 0;
-         }
-         else  wayPt++;*/
-        path.removeFront();
-
+        if (wayPt == wayPtsCnt - 1) {
+          wayPt = 0;
+        }
+        else  wayPt++;
         restart = true;
       }
     }
@@ -565,7 +560,7 @@ void loop() {
       lcd.setBacklight(TEAL);
       gripState = gOpen;
       RobotBase.setMax(canSpeed, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y, false);
+      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y, true);
     }
     else if (RobotBase.navDone()) {
       mode = mGrabCan;
@@ -579,7 +574,7 @@ void loop() {
       RobotBase.stop(false);     
     }
     if (curGrip == SERVO_G_CLOSE) {
-      if (digitalReadFast(IRB_F) == 0) {
+      if (digitalRead(IRB_F) == 0) {
         mode = mDriveGoal;
       }
       else {
@@ -598,7 +593,7 @@ void loop() {
   case mDriveGoal:
     if (newState) {
       lcd.setBacklight(GREEN);
-      //removeCan(targetCan);
+      removeCan(targetCan);
       RobotBase.setMax(goalSpeed, 2.0); //cm/s, Rad/s
       RobotBase.turnToAndDrive(GOAL_X - 40, GOAL_Y, false);
     } 
@@ -610,7 +605,6 @@ void loop() {
   case mDriveInGoal:
     if (newState) {
       lcd.setBacklight(GREEN);
-      removeCan(targetCan);
       RobotBase.setMax(20, 2.0); //cm/s, Rad/s
       RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
     } 
@@ -633,13 +627,13 @@ void loop() {
   case mBackup:
     if (newState) {
       RobotBase.setVelocityAndTurn(-20.0, 0.0);
-    } 
-    else {
+    } else {
       backupAction.check();     
     }
     break;
 
   case mLocalize:
+    Serial.println(localizeStep);
     if (newState) {
       localState = lReset;
       localize();
@@ -650,8 +644,8 @@ void loop() {
       if (localizeStep == 25) {
         localState = lFinish;
         localize();
-        if (returnPos.active) mode = mReturnToPos;
-        else mode = mWander;
+		if (returnPos.active) mode = mReturnToPos;
+		else mode = mWander;
       }
     }
     break;
@@ -679,9 +673,9 @@ void loop() {
       float relY = 25 * sin(-.17);
       float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
-      Point p = {
-        RobotBase.getX() + relXrotated, RobotBase.getY() + relYrotated      };
-      RobotBase.driveTo(destX,destY, false);
+      double destX = RobotBase.getX() + relXrotated;
+      double destY = RobotBase.getY() + relYrotated;
+      RobotBase.driveTo(destX,destY, true);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -698,7 +692,7 @@ void loop() {
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
       float destX = RobotBase.getX() + relXrotated;
       float destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY, false);
+      RobotBase.driveTo(destX,destY, true);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -712,7 +706,7 @@ void loop() {
       RobotBase.turnToAndDrive(returnPos.pos.x, returnPos.pos.y, false);     
     }
     else {
-      if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
+      if (digitalRead(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
         mode = mDriveGoal;
       }      
       else if (targetCan != -1) {
@@ -730,8 +724,6 @@ void loop() {
 }  // close loop
 
 void detectCan(int sensor, int curDist) {
-  setLCD("d");
-
   if (mode != mWander && mode != mReturnToPos) return;
   if (sensor == IRF) return;  // don't try to detect cans by width with the front sensor
   if (RobotBase.getVelocity() < 2.0) return; // don't detect cans if we'er not rolling forward
@@ -867,8 +859,6 @@ void resetCanDetection(int sensor) {
 }
 
 void chooseCan() {
-  setLCD("c");
-
   float dist = 1000;
   if (targetCan == -1) {
     double x = RobotBase.getX();
@@ -897,26 +887,23 @@ void chooseCan() {
 }
 
 void readIrSensors() {
-  setLCD("r");
-
   for (int i = 0; i < IR_END; ++i) {
     detectCan(i, RobotBase.irDistance((IR_Index)i));
   }
 }
 
 void addCan(float x, float y) {
-  lcd.setCursor(0,0);
-  lcd.print(nextCan);
-
+  bool duplicate = false;  // prevent duplicate cans in the list
   for (int i = 0; i < canCapacity; i++) {
     if (cans[i].ts != 0 && fabs(cans[i].pos.x - x) < 10 && fabs(cans[i].pos.y - y) < 10) {
       return;
     }
   }
 
-  double dX = GOAL_X - x;
-  double dY = GOAL_Y - y;
-  double distToGoal = hypot(dX,dY);
+  if (!duplicate) {  // if the can is not a duplicate add it to the list
+    double dX = GOAL_X - x;
+    double dY = GOAL_Y - y;
+    double distToGoal = hypot(dX,dY);
 
   cans[nextCan].ts = millis();  
   cans[nextCan].pos.x = x;
@@ -933,18 +920,9 @@ void addCan(float x, float y) {
     Serial.println("** Discard Duplicate Can **");
 #endif
   }
-  setLCD("A");
 }
 
 void removeCan(int canIndex) {
-  setLCD("r");
-
-  if (canIndex == -1) {
-    lcd.setBacklight(RED);
-    int a = 0;
-    int b = 3 / a;
-  }
-
   cans[canIndex].ts = 0;
   cans[canIndex].next = nextCan;
   nextCan = canIndex;
@@ -952,27 +930,35 @@ void removeCan(int canIndex) {
 }
 
 void getHeading() {  
-  setLCD("h");
+  compass.read();
+  adjHeading = compass.heading() - headingOffset;
+  if (adjHeading < 0) adjHeading += 360;
+  else if (adjHeading > 360) adjHeading -= 360;
 
-  /*compass.read();
-   adjHeading = compass.heading() - headingOffset;
-   if (adjHeading < 0) adjHeading += 360;
-   else if (adjHeading > 360) adjHeading -= 360;
-   
-   if (adjHeading < 180) adjHeading = -adjHeading;
-   else if (adjHeading > 180) adjHeading = -(adjHeading - 360);*/
+  if (adjHeading < 180) adjHeading = -adjHeading;
+  else if (adjHeading > 180) adjHeading = -(adjHeading - 360);
 }
 
 void ping() {
   digitalWrite(SNR_RX, HIGH);
   delayMicroseconds(20);
   digitalWrite(SNR_RX, LOW);
-  //sonarDist = pulseIn(SNR_PW, HIGH) / 147.0; 
+
+  /* Using interupts instead of pulseIn which is blocking
+   sonarDist = pulseIn(SNR_PW, HIGH) / 147.0; 
+   */
+}
+
+void readSonarPulse() {
+  if (digitalRead(SNR_PW) == HIGH) {
+    pulseStart = micros();
+  }
+  else
+    pulseEnd = micros();
+  sonarDist = ((pulseEnd - pulseStart) / 147.0) * 2.54;
 }
 
 void gripper() {
-  setLCD("g");
-
   if (gripState == gClose) {
     curGrip -= gripStep;
 
@@ -1056,9 +1042,9 @@ void compassInit () {
       Calibration values obtained from running calibration example.
    */
   compass.m_min = (LSM303::vector<int16_t>){
-    -398, -374, -489          };
+    -398, -374, -489  };
   compass.m_max = (LSM303::vector<int16_t>){
-    +240, +250, +0          };
+    +240, +250, +0  };
 
   float _heading = 0;
   for (int i = 0; i < 100; i++) {
@@ -1072,6 +1058,11 @@ void compassInit () {
 void sonarInit() {
   pinMode(SNR_RX, OUTPUT);
   pinMode(SNR_PW, INPUT);  
+  attachInterrupt(SNR_PW, readSonarPulse, CHANGE);
+}
+
+void getPulseTime() {
+  pulseEnd = micros();
 }
 
 void bumperInit(){
@@ -1144,10 +1135,6 @@ void debugSonar() {
 #endif
 #endif
 }
-
-
-
-
 
 
 
