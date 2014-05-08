@@ -15,7 +15,7 @@
 #define DEBUG_IR false
 #define DEBUG_DETECT_CAN false
 #define DEBUG_HEADING false
-#define DEBUG_SONAR false
+#define DEBUG_SONAR true
 
 int objMinWidth = 4;
 int objMaxWidth = 8;
@@ -173,7 +173,9 @@ int scanSpeed = 20;
 int goalSpeed = 45;
 int canSpeed = 35;
 
-float sonarDist;
+// Sonar start and end times in micros
+volatile long pulseStart, pulseEnd;
+volatile int sonarDist;
 
 TimedAction irAction = TimedAction(40,readIrSensors); 
 TimedAction gripAction = TimedAction(gripDelay,gripper); 
@@ -191,7 +193,8 @@ typedef enum {
   lReset,
   lRun,
   lFinish
-} LocalizeState;
+} 
+LocalizeState;
 
 LocalizeState localState = lReset;
 
@@ -199,7 +202,7 @@ unsigned long lastLocal, curLocal;
 int localizeStep = 0;
 float ir[5];
 
-bool doLocalize = true;
+bool doLocalize = false;
 
 bool localizeFailX = false;
 bool localizeFailY = false;
@@ -214,24 +217,25 @@ int backupCount = 0;
 
 void checkBackup() {
   int left, right, width;
-  
+
   left = RobotBase.irDistance(IRL);
   right = RobotBase.irDistance(IRR);
-  
+
   width = left + right + 16;
-  
+
   Serial.print("Backup: ");
   Serial.print(width);
   Serial.print(" / ");
   Serial.print(FIELDWIDTH);
-  
+
   if (width > FIELDWIDTH - 1) {
     if (doLocalize) {
       mode = mLocalize;
-    } else {
+    } 
+    else {
       mode = mWander;
     }
-    
+
     RobotBase.stop(true);
   }
 }
@@ -241,77 +245,80 @@ void localize() {
   int i;
   float c, calcTheta, width, calcY, calcX = 0;
   Point left, right;
-  
+
   switch (localState) {
-    case lReset:
+  case lReset:
+    for (i = 0; i < 5; ++i) {
+      ir[i] = 0;
+    }
+
+    localState = lRun;
+
+    localizeStep = 0;
+    break;
+
+  case lRun:
+    if (curLocal - 40 > lastLocal) {
+      lastLocal = curLocal;
+      ++localizeStep;
+
       for (i = 0; i < 5; ++i) {
-        ir[i] = 0;
+        ir[i] += RobotBase.irDistance((IR_Index)i);
       }
-      
-      localState = lRun;
-      
-      localizeStep = 0;
-      break;
-      
-    case lRun:
-      if (curLocal - 40 > lastLocal) {
-        lastLocal = curLocal;
-        ++localizeStep;
-        
-        for (i = 0; i < 5; ++i) {
-          ir[i] += RobotBase.irDistance((IR_Index)i);
-        }
+    }
+    break;
+
+  case lFinish:
+    for (i = 0; i < 5; ++i) {
+      ir[i] /= localizeStep;
+    }
+
+    if (ir[IRL] > 150 || ir[IRR] > 150) {
+      localizeFailY = true;
+      localizeFailTheta = true;
+    } 
+    else {
+      width = ir[IRL] + ir[IRR] + 16;
+      if (width > FIELDWIDTH) {          
+        c = FIELDWIDTH / width;
+        calcTheta = acos(c);
+
+        calcY = (c * (ir[IRR] - ir[IRL])) / 2.0;
+
+        RobotBase.localizeY(calcY);
+        RobotBase.localizeTheta(calcTheta);
+
+        localizeFailY = false;
+        localizeFailTheta = false;
       }
-      break;
-      
-    case lFinish:
-      for (i = 0; i < 5; ++i) {
-        ir[i] /= localizeStep;
+
+      if (ir[IRFL] < localDist) {
+        left = RobotBase.obsPos(IRFL, sensors[IRFL]);
+        left = rotate(left, RobotBase.getTheta());
+        calcX = FIELDLENGTH - left.x;
       }
-      
-      if (ir[IRL] > 150 || ir[IRR] > 150) {
-        localizeFailY = true;
-        localizeFailTheta = true;
-      } else {
-        width = ir[IRL] + ir[IRR] + 16;
-        if (width > FIELDWIDTH) {          
-          c = FIELDWIDTH / width;
-          calcTheta = acos(c);
-          
-          calcY = (c * (ir[IRR] - ir[IRL])) / 2.0;
-          
-          RobotBase.localizeY(calcY);
-          RobotBase.localizeTheta(calcTheta);
-          
-          localizeFailY = false;
-          localizeFailTheta = false;
-        }
-        
-        if (ir[IRFL] < localDist) {
-          left = RobotBase.obsPos(IRFL, sensors[IRFL]);
-          left = rotate(left, RobotBase.getTheta());
-          calcX = FIELDLENGTH - left.x;
-        }
-        
-        if (ir[IRFR] < localDist) {
-          right = RobotBase.obsPos(IRFR, sensors[IRFR]);
-          right = rotate(right, RobotBase.getTheta());
-          
-          if (calcX == 0) {
-            calcX = (calcX + FIELDLENGTH - right.x) / 2.0;
-          } else {
-            calcX = FIELDLENGTH - right.x;
-          }
-        }
-        
-        if (calcX != 0) {
-          RobotBase.localizeX(calcX);
-          localizeFailX = false;
-        } else {
-          localizeFailX = true;
+
+      if (ir[IRFR] < localDist) {
+        right = RobotBase.obsPos(IRFR, sensors[IRFR]);
+        right = rotate(right, RobotBase.getTheta());
+
+        if (calcX == 0) {
+          calcX = (calcX + FIELDLENGTH - right.x) / 2.0;
+        } 
+        else {
+          calcX = FIELDLENGTH - right.x;
         }
       }
-      break;
+
+      if (calcX != 0) {
+        RobotBase.localizeX(calcX);
+        localizeFailX = false;
+      } 
+      else {
+        localizeFailX = true;
+      }
+    }
+    break;
   }        
 }
 
@@ -412,7 +419,7 @@ void loop() {
   if (mode != mWaitStart) {
     chooseCanAction.check();
     irAction.check();
-    pingAction.check();
+    pingAction.check();   
     debugSonarAction.check();
     debugHeadingAction.check();
 
@@ -421,16 +428,16 @@ void loop() {
       mode = mReset;
     }
 
-    if (digitalReadFast(IRB_FL) == 0) {
-      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
+    if (digitalRead(IRB_FL) == 0) {
+      if (mode != mBackup && mode != mDropCan && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
         if (mode != mEvadeRight) nextMode = lastMode;
         if (nextMode == mDriveCan) nextMode = mWander;
         mode = mEvadeRight;
       }
     }
 
-    if (digitalReadFast(IRB_FR) == 0) {
-      if (mode != mBackup && mode != mDropCan && RobotBase.getX() < MAX_X - 15) {
+    if (digitalRead(IRB_FR) == 0) {
+      if (mode != mBackup && mode != mDropCan && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
         if (mode != mEvadeLeft) nextMode = lastMode;
         if (nextMode == mDriveCan) nextMode = mWander;
         mode = mEvadeLeft;
@@ -438,7 +445,7 @@ void loop() {
     }
   }  // if !mWaitStart
 
-  newState = (lastMode != mode) || restart;
+    newState = (lastMode != mode) || restart;
   restart = false;
 
   lastMode = mode;
@@ -472,7 +479,7 @@ void loop() {
       RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y, false);
     } 
     else {
-      if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
+      if (digitalRead(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
         mode = mDriveGoal;
       }      
       else if (targetCan != -1) {
@@ -498,7 +505,7 @@ void loop() {
       lcd.setBacklight(TEAL);
       gripState = gOpen;
       RobotBase.setMax(canSpeed, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y, false);
+      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y, true);
     }
     else if (RobotBase.navDone()) {
       mode = mGrabCan;
@@ -512,7 +519,7 @@ void loop() {
       RobotBase.stop(false);     
     }
     if (curGrip == SERVO_G_CLOSE) {
-      if (digitalReadFast(IRB_F) == 0) {
+      if (digitalRead(IRB_F) == 0) {
         mode = mDriveGoal;
       }
       else {
@@ -533,7 +540,7 @@ void loop() {
       lcd.setBacklight(GREEN);
       removeCan(targetCan);
       RobotBase.setMax(goalSpeed, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(GOAL_X - 40, GOAL_Y, false);
+      RobotBase.turnToAndDrive(GOAL_X - 20, GOAL_Y, false);
     } 
     else if (RobotBase.navDone()) {
       mode = mDriveInGoal;
@@ -543,9 +550,8 @@ void loop() {
   case mDriveInGoal:
     if (newState) {
       lcd.setBacklight(GREEN);
-      removeCan(targetCan);
       RobotBase.setMax(20, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
+      RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, true);
     } 
     else if (RobotBase.navDone()) {
       mode = mDropCan;
@@ -566,24 +572,34 @@ void loop() {
   case mBackup:
     if (newState) {
       RobotBase.setVelocityAndTurn(-20.0, 0.0);
-    } else {
-      backupAction.check();     
+    } 
+    else {
+      if (RobotBase.getX() < GOAL_X - 10) {
+        RobotBase.stop(false);
+        mode = mWander;
+      }
+      //backupAction.check();     
     }
     break;
-  
+
   case mLocalize:
     Serial.println(localizeStep);
     if (newState) {
       localState = lReset;
       localize();
       localizeAction.reset();
-    } else {
+    } 
+    else {
       localizeAction.check();
       if (localizeStep == 25) {
         localState = lFinish;
         localize();
-		if (returnPos.active) mode = mReturnToPos;
-		else mode = mWander;
+        if (returnPos.active) mode = mReturnToPos;
+        else mode = mWander;
+      }
+      else {
+        if (returnPos.active) mode = mReturnToPos;
+        else mode = mWander;
       }
     }
     break;
@@ -613,7 +629,7 @@ void loop() {
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
       double destX = RobotBase.getX() + relXrotated;
       double destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY, false);
+      RobotBase.driveTo(destX,destY, true);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -630,7 +646,7 @@ void loop() {
       float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
       float destX = RobotBase.getX() + relXrotated;
       float destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY, false);
+      RobotBase.driveTo(destX,destY, true);
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -644,7 +660,7 @@ void loop() {
       RobotBase.turnToAndDrive(returnPos.pos.x, returnPos.pos.y, false);     
     }
     else {
-      if (digitalReadFast(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
+      if (digitalRead(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
         mode = mDriveGoal;
       }      
       else if (targetCan != -1) {
@@ -882,7 +898,19 @@ void ping() {
   digitalWrite(SNR_RX, HIGH);
   delayMicroseconds(20);
   digitalWrite(SNR_RX, LOW);
-  //sonarDist = pulseIn(SNR_PW, HIGH) / 147.0; 
+
+  /* Using interupts instead of pulseIn which is blocking
+   sonarDist = pulseIn(SNR_PW, HIGH) / 147.0; 
+   */
+}
+
+void readSonarPulse() {
+  if (digitalRead(SNR_PW) == HIGH) {
+    pulseStart = micros();
+  }
+  else
+    pulseEnd = micros();
+  sonarDist = ((pulseEnd - pulseStart) / 147.0) * 2.54;
 }
 
 void gripper() {
@@ -969,9 +997,9 @@ void compassInit () {
       Calibration values obtained from running calibration example.
    */
   compass.m_min = (LSM303::vector<int16_t>){
-    -398, -374, -489  };
+    -398, -374, -489      };
   compass.m_max = (LSM303::vector<int16_t>){
-    +240, +250, +0  };
+    +240, +250, +0      };
 
   float _heading = 0;
   for (int i = 0; i < 100; i++) {
@@ -985,6 +1013,11 @@ void compassInit () {
 void sonarInit() {
   pinMode(SNR_RX, OUTPUT);
   pinMode(SNR_PW, INPUT);  
+  attachInterrupt(SNR_PW, readSonarPulse, CHANGE);
+}
+
+void getPulseTime() {
+  pulseEnd = micros();
 }
 
 void bumperInit(){
@@ -1057,6 +1090,8 @@ void debugSonar() {
 #endif
 #endif
 }
+
+
 
 
 
