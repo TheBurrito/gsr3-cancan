@@ -4,24 +4,17 @@
 #include <Wire.h>
 #include <LiquidTWI2.h>
 #include <Adafruit_RGBLCDShield.h>
-#include <LSM303.h>
 #include <Servo.h>
 #include <Pins.h>
-
-#include <deque>
 
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
 #define DEBUG_DETECT_CAN false
-#define DEBUG_HEADING false
 #define DEBUG_SONAR true
 
 int objMinWidth = 4;
 int objMaxWidth = 8;
-
-LSM303 compass;
-float headingOffset, adjHeading;
 
 Servo servoG; // define the Gripper Servo
 #define SERVO_G_CLOSE 36
@@ -182,7 +175,6 @@ TimedAction gripAction = TimedAction(gripDelay,gripper);
 TimedAction debugIrAction = TimedAction(1000,debugIr);
 TimedAction chooseCanAction = TimedAction(2000,chooseCan);
 TimedAction celebrateAction = TimedAction(150,celebrate);
-TimedAction compassAction = TimedAction(10,getHeading);
 TimedAction debugHeadingAction = TimedAction(500,debugHeading);
 TimedAction debugSonarAction = TimedAction(1000,debugSonar);
 TimedAction pingAction = TimedAction(200,ping);
@@ -403,7 +395,6 @@ void setup() {
 
   Serial.begin(115200);
   lcdInit();
-  compassInit();
   sonarInit();
   bumperInit();
   servoG.attach(SERVO_G);  // init gripper servo
@@ -413,7 +404,6 @@ void setup() {
 void loop() {
   RobotBase.update();
 
-  compassAction.check();
   gripAction.check();
 
   if (mode != mWaitStart) {
@@ -884,16 +874,6 @@ void removeCan(int canIndex) {
   targetCan = -1;
 }
 
-void getHeading() {  
-  compass.read();
-  adjHeading = compass.heading() - headingOffset;
-  if (adjHeading < 0) adjHeading += 360;
-  else if (adjHeading > 360) adjHeading -= 360;
-
-  if (adjHeading < 180) adjHeading = -adjHeading;
-  else if (adjHeading > 180) adjHeading = -(adjHeading - 360);
-}
-
 void ping() {
   digitalWrite(SNR_RX, HIGH);
   delayMicroseconds(20);
@@ -987,27 +967,6 @@ void lcdInit() {
   // set up the LCD's number of columns and rows: 
   lcd.begin(16, 2);
   lcd.setBacklight(WHITE);
-}
-
-void compassInit () {  
-  compass.init();
-  compass.enableDefault();
-
-  /*
-      Calibration values obtained from running calibration example.
-   */
-  compass.m_min = (LSM303::vector<int16_t>){
-    -398, -374, -489      };
-  compass.m_max = (LSM303::vector<int16_t>){
-    +240, +250, +0      };
-
-  float _heading = 0;
-  for (int i = 0; i < 100; i++) {
-    delay(10);
-    compass.read();
-    _heading = _heading + compass.heading();
-  }
-  headingOffset = _heading / 100;
 }
 
 void sonarInit() {
