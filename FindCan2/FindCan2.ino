@@ -55,6 +55,7 @@ LiquidTWI2 lcd(0);
 #define ROBOT_FRONT_OFFSET 7.3 // to front of case
 #define ROBOT_REAR_OFFSET 10.7 // to rear of case
 #define ROBOT_WHEEL_OFFSET 9.2 // to outside of wheel
+#define ROBOT_SONAR_OFFSET 6.0 // to end of sonar
 
 #define WALL_BUFFER 10 // padding around walls to exclude from object detection
 /*
@@ -63,7 +64,7 @@ LiquidTWI2 lcd(0);
  2 - contigent arena size ?x?
  3 - home arena size 4'x8'
  */
-#define ARENA 1
+#define ARENA 3
 
 #if ARENA == 1 // ft * in/ft * cm/in
 #define ARENA_W 7
@@ -104,7 +105,6 @@ typedef enum {
   mDriveInGoal,
   mDropCan,
   mBackup,
-  mLocalize,
   mStop,
   mReset,
   mEvadeRight,
@@ -173,146 +173,15 @@ volatile int sonarDist;
 TimedAction irAction = TimedAction(40,readIrSensors); 
 TimedAction gripAction = TimedAction(gripDelay,gripper); 
 TimedAction debugIrAction = TimedAction(1000,debugIr);
-TimedAction chooseCanAction = TimedAction(2000,chooseCan);
+TimedAction chooseCanAction = TimedAction(700,chooseCan);
 TimedAction celebrateAction = TimedAction(150,celebrate);
-TimedAction debugHeadingAction = TimedAction(500,debugHeading);
 TimedAction debugSonarAction = TimedAction(1000,debugSonar);
 TimedAction pingAction = TimedAction(200,ping);
-TimedAction localizeAction = TimedAction(40, localize);
-TimedAction backupAction = TimedAction(40, checkBackup);
+TimedAction checkForwardObstacleAction = TimedAction(300,checkForwardObstacle);
 
-typedef enum {
-  lReset,
-  lRun,
-  lFinish
-} 
-LocalizeState;
-
-LocalizeState localState = lReset;
-
-unsigned long lastLocal, curLocal;
-int localizeStep = 0;
-float ir[5];
-
-bool doLocalize = false;
-
-bool localizeFailX = false;
-bool localizeFailY = false;
-bool localizeFailTheta = false;
-
-int localDist = 78;
-
-#define FIELDWIDTH (ARENA_W * 12 * 2.54)
-#define FIELDLENGTH (ARENA_L * 12 * 2.54)
-
-int backupCount = 0;
-
-void checkBackup() {
-  int left, right, width;
-
-  left = RobotBase.irDistance(IRL);
-  right = RobotBase.irDistance(IRR);
-
-  width = left + right + 16;
-
-  Serial.print("Backup: ");
-  Serial.print(width);
-  Serial.print(" / ");
-  Serial.print(FIELDWIDTH);
-
-  if (width > FIELDWIDTH - 1) {
-    if (doLocalize) {
-      mode = mLocalize;
-    } 
-    else {
-      mode = mWander;
-    }
-
-    RobotBase.stop(true);
-  }
-}
-
-void localize() {
-  curLocal = millis();
-  int i;
-  float c, calcTheta, width, calcY, calcX = 0;
-  Point left, right;
-
-  switch (localState) {
-  case lReset:
-    for (i = 0; i < 5; ++i) {
-      ir[i] = 0;
-    }
-
-    localState = lRun;
-
-    localizeStep = 0;
-    break;
-
-  case lRun:
-    if (curLocal - 40 > lastLocal) {
-      lastLocal = curLocal;
-      ++localizeStep;
-
-      for (i = 0; i < 5; ++i) {
-        ir[i] += RobotBase.irDistance((IR_Index)i);
-      }
-    }
-    break;
-
-  case lFinish:
-    for (i = 0; i < 5; ++i) {
-      ir[i] /= localizeStep;
-    }
-
-    if (ir[IRL] > 150 || ir[IRR] > 150) {
-      localizeFailY = true;
-      localizeFailTheta = true;
-    } 
-    else {
-      width = ir[IRL] + ir[IRR] + 16;
-      if (width > FIELDWIDTH) {          
-        c = FIELDWIDTH / width;
-        calcTheta = acos(c);
-
-        calcY = (c * (ir[IRR] - ir[IRL])) / 2.0;
-
-        RobotBase.localizeY(calcY);
-        RobotBase.localizeTheta(calcTheta);
-
-        localizeFailY = false;
-        localizeFailTheta = false;
-      }
-
-      if (ir[IRFL] < localDist) {
-        left = RobotBase.obsPos(IRFL, sensors[IRFL]);
-        left = rotate(left, RobotBase.getTheta());
-        calcX = FIELDLENGTH - left.x;
-      }
-
-      if (ir[IRFR] < localDist) {
-        right = RobotBase.obsPos(IRFR, sensors[IRFR]);
-        right = rotate(right, RobotBase.getTheta());
-
-        if (calcX == 0) {
-          calcX = (calcX + FIELDLENGTH - right.x) / 2.0;
-        } 
-        else {
-          calcX = FIELDLENGTH - right.x;
-        }
-      }
-
-      if (calcX != 0) {
-        RobotBase.localizeX(calcX);
-        localizeFailX = false;
-      } 
-      else {
-        localizeFailX = true;
-      }
-    }
-    break;
-  }        
-}
+bool obstacleCenter, obstacleLeft, obstacleRight;
+double turnAdjust;
+double turnFactor = 5;
 
 void setup() {
 
@@ -410,8 +279,8 @@ void loop() {
     chooseCanAction.check();
     irAction.check();
     pingAction.check();   
+    checkForwardObstacleAction.check();
     debugSonarAction.check();
-    debugHeadingAction.check();
 
     if (celebrateGoal) celebrateAction.check();
     if (errorCnt > errorThresh) {
@@ -419,17 +288,19 @@ void loop() {
     }
 
     if (digitalRead(IRB_FL) == 0) {
-      if (mode != mBackup && mode != mDropCan && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
+      if (mode != mBackup && mode != mDropCan && mode != mGrabCan && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
         if (mode != mEvadeRight) nextMode = lastMode;
         if (nextMode == mDriveCan) nextMode = mWander;
+        obstacleLeft = true;
         mode = mEvadeRight;
       }
     }
 
     if (digitalRead(IRB_FR) == 0) {
-      if (mode != mBackup && mode != mDropCan && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
+      if (mode != mBackup && mode != mDropCan && mode != mGrabCan && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
         if (mode != mEvadeLeft) nextMode = lastMode;
         if (nextMode == mDriveCan) nextMode = mWander;
+        obstacleRight = true;
         mode = mEvadeLeft;
       }    
     }
@@ -495,7 +366,7 @@ void loop() {
       lcd.setBacklight(TEAL);
       gripState = gOpen;
       RobotBase.setMax(canSpeed, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y, true);
+      RobotBase.turnToAndDrive(cans[targetCan].pos.x, cans[targetCan].pos.y, false);
     }
     else if (RobotBase.navDone()) {
       mode = mGrabCan;
@@ -541,7 +412,7 @@ void loop() {
     if (newState) {
       lcd.setBacklight(GREEN);
       RobotBase.setMax(20, 2.0); //cm/s, Rad/s
-      RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, true);
+      RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
     } 
     else if (RobotBase.navDone()) {
       mode = mDropCan;
@@ -568,29 +439,6 @@ void loop() {
         RobotBase.stop(false);
         mode = mWander;
       }
-      //backupAction.check();     
-    }
-    break;
-
-  case mLocalize:
-    Serial.println(localizeStep);
-    if (newState) {
-      localState = lReset;
-      localize();
-      localizeAction.reset();
-    } 
-    else {
-      localizeAction.check();
-      if (localizeStep == 25) {
-        localState = lFinish;
-        localize();
-        if (returnPos.active) mode = mReturnToPos;
-        else mode = mWander;
-      }
-      else {
-        if (returnPos.active) mode = mReturnToPos;
-        else mode = mWander;
-      }
     }
     break;
 
@@ -613,13 +461,7 @@ void loop() {
 
   case mEvadeRight:
     if (newState) {
-      float relX = 25 * cos(-.17);
-      float relY = 25 * sin(-.17);
-      float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
-      float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
-      double destX = RobotBase.getX() + relXrotated;
-      double destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY, true);
+      findRoute();
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -627,16 +469,9 @@ void loop() {
     }
     break;
 
-
   case mEvadeLeft:
     if (newState) {
-      float relX = 25 * cos(.17);
-      float relY = 25 * sin(.17);
-      float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
-      float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
-      float destX = RobotBase.getX() + relXrotated;
-      float destY = RobotBase.getY() + relYrotated;
-      RobotBase.driveTo(destX,destY, true);
+      findRoute();
       gripState = gClose;
     }
     else if (RobotBase.navDone()) {
@@ -666,6 +501,70 @@ void loop() {
 
   }  // close switch mode
 }  // close loop
+
+void findRoute() {
+  if (obstacleCenter && obstacleLeft && obstacleRight){
+    RobotBase.stop(false);
+  }  
+  else if (obstacleCenter && obstacleLeft) {
+    evalWayPoint(20,-0.79);
+  }
+  else if (obstacleCenter && obstacleRight) {
+    evalWayPoint(20,0.79);
+  }
+  else if (obstacleCenter) {
+    if (mode == mEvadeLeft) {
+      int diff = 40 - sonarDist;
+      if (diff > 0) {
+        turnAdjust = diff / turnFactor;
+        RobotBase.setTurnAdjust(turnAdjust);
+      }      //evalWayPoint(20,0.79);
+    }
+    else if (mode == mEvadeRight) {
+      int diff = 40 - sonarDist;
+      if (diff > 0) {
+        turnAdjust = diff / turnFactor;
+        RobotBase.setTurnAdjust(-turnAdjust);
+      }
+    }
+    else if (obstacleLeft) {
+      int diff = 40 - sonarDist;
+      if (diff > 0) {
+        turnAdjust = diff / turnFactor;
+        RobotBase.setTurnAdjust(-turnAdjust);
+      }
+      //evalWayPoint(20,-0.79);
+    }
+    else if (obstacleRight) {
+      int diff = 40 - sonarDist;
+      if (diff > 0) {
+        turnAdjust = diff / turnFactor;
+        RobotBase.setTurnAdjust(turnAdjust);
+      }
+      //evalWayPoint(20,0.79);
+    }
+  }
+
+  obstacleCenter = false;
+  obstacleLeft = false;
+  obstacleRight = false;
+}
+
+void evalWayPoint(int dist, float rads) {
+  float relX = dist * cos(rads);
+  float relY = dist * sin(rads);
+  float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
+  float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());  
+  float destX = RobotBase.getX() + relXrotated;
+  float destY = RobotBase.getY() + relYrotated;
+
+  if (destX < MAX_X && destX > MIN_X && destY < MAX_Y && destY > MIN_Y) {
+    RobotBase.driveTo(destX,destY, true);
+  }
+  else {
+    RobotBase.stop(true);
+  }
+}
 
 void detectCan(int sensor, int curDist) {
   if (mode != mWander && mode != mReturnToPos) return;
@@ -891,6 +790,7 @@ void readSonarPulse() {
   else
     pulseEnd = micros();
   sonarDist = ((pulseEnd - pulseStart) / 147.0) * 2.54;
+  if (sonarDist < 0) sonarDist = 300;
 }
 
 void gripper() {
@@ -979,6 +879,59 @@ void getPulseTime() {
   pulseEnd = micros();
 }
 
+void checkForwardObstacle() {
+  if (sonarDist < 40) {
+    int mSpeed = sonarDist / 2;
+    if (mSpeed < 5) mSpeed = 5;
+    RobotBase.setMax(mSpeed, 2.0); //cm/s, Rad/s
+    if (mode != mBackup && 
+      mode != mDropCan && 
+      mode != mGrabCan && 
+      mode != mDriveCan && 
+      !RobotBase.getTurning() &&
+      RobotBase.getX() < MAX_X - 15
+      ) {
+/* 
+      float relX = sonarDist - ROBOT_FRONT_OFFSET - ROBOT_SONAR_OFFSET;
+      float relY = 0;
+      float relXrotated = relX * cos(RobotBase.getTheta()) - relY * sin(RobotBase.getTheta());
+      float relYrotated = relX * sin(RobotBase.getTheta()) + relY * cos(RobotBase.getTheta());
+      float objX = RobotBase.getX() + relXrotated;
+      float objY = RobotBase.getY() + relYrotated;
+      if (objX < MAX_X && objX > MIN_X && objY < MAX_Y && objY > MIN_Y) {
+*/
+        obstacleCenter = true;
+        lcd.setCursor(0,1);
+        lcd.print("Object");
+        float theta = RobotBase.getTheta();
+        float curX = RobotBase.getX();
+        float curY = RobotBase.getY();
+
+        if (theta < 0 && theta >= -1.57) {
+          if (curY < MIN_Y + 30) {
+            mode = mEvadeRight;
+          }
+          else if (curY > MAX_Y -30) {
+            mode = mEvadeLeft;
+          }
+        } 
+        else if (theta < -1.57 && theta >= -3.14) {
+          mode = mEvadeLeft;
+        } 
+        else if (theta > 0 && theta < 1.57) {
+          mode = mEvadeLeft;
+        } 
+        else if (theta > 1.57 && theta <= 3.14) {
+          mode = mEvadeLeft;
+        } 
+//      }
+    }
+  }
+    else {
+      RobotBase.setTurnAdjust(turnAdjust / 2);
+    }
+}
+
 void bumperInit(){
   pinMode(IRB_FR, INPUT);
   pinMode(IRB_F, INPUT);
@@ -1015,26 +968,6 @@ void debugIr() {
 #endif
 }
 
-void debugHeading() {
-#if DEBUG_HEADING
-#if DEBUG_USE_LCD
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Theta  : ");
-  lcd.print(RobotBase.getTheta() * 180 / PI);
-  lcd.setCursor(0,1);
-  lcd.print("Heading: ");
-  lcd.print(adjHeading);
-#endif
-#if DEBUG_USE_SERIAL
-  Serial.print("Theta  : ");
-  Serial.println(RobotBase.getTheta());
-  Serial.print("Heading: ");
-  Serial.println(adjHeading);
-#endif
-#endif
-}
-
 void debugSonar() {
 #if DEBUG_SONAR
 #if DEBUG_USE_LCD
@@ -1049,6 +982,12 @@ void debugSonar() {
 #endif
 #endif
 }
+
+
+
+
+
+
 
 
 
