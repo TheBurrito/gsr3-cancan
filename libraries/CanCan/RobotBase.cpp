@@ -88,6 +88,10 @@ void CRobotBase::setTurnRange(double maxTurn, double deadTurn, double minTurn) {
 	_minTurn = minTurn;
 }
 
+void CRobotBase::setTurnAdjust(double turnAdjust) {
+	_turnAdjust = turnAdjust;
+}
+
 void CRobotBase::setTicksPerUnit(const double& tpu) {
 	_tpu = tpu;
 }
@@ -111,6 +115,10 @@ double CRobotBase::getX() {
 
 double CRobotBase::getY() {
 	return _posY + _fixY;
+}
+
+bool CRobotBase::getTurning() {
+	return _turning;
 }
 	
 void CRobotBase::setTheta(const double& theta) {
@@ -218,6 +226,8 @@ void CRobotBase::updateVelocity(double targetVel, double targetTurn, const doubl
 	//Serial.print(targetVel);
 	//Serial.print(", ");
 	//Serial.print(targetTurn);
+	
+	
 	
 	int signVel = sgn(targetVel);
 	int signTurn = sgn(targetTurn);
@@ -410,7 +420,13 @@ void CRobotBase::update() {
 			targetTurn = _targetTurn;
 		} else if (_driving) {
 			targetVelocity = dX;
-			targetTurn = dTheta;
+			targetTurn = dTheta + _turnAdjust;
+Serial.print("dTheta: ");
+Serial.print(dTheta);
+Serial.print("  Target Turn: ");
+Serial.print(targetTurn);
+Serial.print("  Turn Adjust: ");
+Serial.println(_turnAdjust);
 		} else if (_turning) {
 			targetVelocity = 0;
 			targetTurn = dTheta;

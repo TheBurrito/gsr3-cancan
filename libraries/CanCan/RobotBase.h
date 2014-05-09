@@ -56,12 +56,13 @@ public:
 	
 	void setVelocityRange(double maxVel, double deadVel, double minVel);
 	void setTurnRange(double maxTurn, double deadTurn, double minTurn);
+	void setTurnAdjust(double turnAdjust);
 	
 	void setOutputRange(int maxOut, int deadOut, int minOut);
 	
 	void setTicksPerUnit(const double& tpu);
 	void setWidth(const double& width);
-	
+
 	void setOdomPeriod(long odom_ms);
 	void setNavPeriod(long nav_ms);
 	void setIRPeriod(long ir_ms);
@@ -81,6 +82,7 @@ public:
 	double getTheta();
 	double getX();
 	double getY();
+	bool getTurning();
 	
 	double getFixTheta();
 	double getFixX();
@@ -137,7 +139,7 @@ private:
 	int _maxOut, _deadOut, _minOut;
 	
 	double _maxVel, _deadVel, _minVel;
-	double _maxTurn, _deadTurn, _minTurn;
+	double _maxTurn, _deadTurn, _minTurn, _turnAdjust;
 		
 	double _lastDistL, _lastDistR, _tpu;
 	double _dDistL, _dDistR, _width;
