@@ -5,17 +5,7 @@
 //#include "Arduino.h"
 #include "common.h"
 
-typedef enum {
-  IRL,
-  IRFL,
-  IRF,
-  IRFR,
-  IRR,
-
-  IR_END,
-  IR_ALL
-} 
-IR_Index;
+#include "geometry.h"
 
 typedef enum {
 	IR_1080,
@@ -44,15 +34,6 @@ public:
 	
 	void setOdomPeriod(long odom_ms);
 	void setNavPeriod(long nav_ms);
-	void setIRPeriod(long ir_ms);
-	
-	void setIRFilter(double factor);
-	void setIRSamples(int ir_samples);
-	void readAllIR();
-	
-	int irDistance(IR_Index ir);
-	int irDiff(IR_Index ir);
-	Point obsPos(IR_Index ir, const Pose& pose);
 	
 	void update();
 	
@@ -110,8 +91,6 @@ private:
 	void updateOdometry(const long& encL, const long& encR, const double& dt);
 	void updateVelocity(double targetVel, double targetTurn, const double& dt);
 	
-	int readIR(IR_Index ir);
-	
 	double _accel;
 	
 	int _maxOut, _deadOut, _minOut;
@@ -146,22 +125,9 @@ private:
 	
 	long _odom_ms;
 	long _nav_ms;
-	long _ir_ms;
 	
 	unsigned long _lastOdom;
 	unsigned long _lastNav;
-	unsigned long _lastIR;
-	
-	int _irPins[IR_END];
-	IR_Model _irModels[IR_END];
-	
-	int _irDist[IR_END];
-	int _irPrevDist[IR_END];
-	int _irDiff[IR_END];
-	
-	double _irFact;
-	
-	int _irSamples;
 	
 	SimplePID::PID _pidL, _pidR;
 };

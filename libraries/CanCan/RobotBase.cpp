@@ -23,22 +23,6 @@ CRobotBase::CRobotBase() {
   	_turnFirst = false;
   
     analogReference(DEFAULT);
-    
-    _irPins[IRL] = IR_L;
-    _irPins[IRFL] = IR_FL;
-    _irPins[IRF] = IR_F;
-    _irPins[IRFR] = IR_FR;
-    _irPins[IRR] = IR_R;
-    
-    _irModels[IRL] = IR_20150;
-    _irModels[IRFL] = IR_1080;
-    _irModels[IRF] = IR_1080;
-    _irModels[IRFR] = IR_1080;
-    _irModels[IRR] = IR_20150;
-    
-    for (int i = 0; i < IR_END; ++i) {
-    	pinMode(_irPins[i], INPUT);
-	}
 	
 	_distSumL = 0;
 	_distSumR = 0;
@@ -311,33 +295,6 @@ void CRobotBase::setNavPeriod(long nav_ms) {
 	_nav_ms = nav_ms;
 }
 
-void CRobotBase::setIRPeriod(long ir_ms) {
-	_ir_ms = ir_ms;
-}
-
-void CRobotBase::setIRSamples(int ir_samples) {
-	_irSamples = ir_samples;
-}
-
-int CRobotBase::irDistance(IR_Index ir) {
-	return _irDist[ir];
-}
-
-Point CRobotBase::obsPos(IR_Index ir, const Pose& pose) {
-	Point p;
-	p.x = _irDist[ir];
-	p.y = 0;
-	p = rotate(p, pose.a);
-	p.x += pose.p.x;
-	p.y += pose.p.y;
-	
-	return p;
-}
-
-int CRobotBase::irDiff(IR_Index ir) {
-	return _irDist[ir] - _irPrevDist[ir];
-}
-
 void CRobotBase::update() {
 	
 	unsigned long curMillis = millis();
@@ -352,11 +309,6 @@ void CRobotBase::update() {
 		updateOdometry(encL, encR, dt);
 		
 		_lastOdom = curMillis;
-	}
-	
-	curMillis = millis();
-	if (_lastIR + _ir_ms <= curMillis) {
-		readAllIR();
 	}
 	
 	curMillis = millis();
@@ -434,94 +386,6 @@ void CRobotBase::setVelocityAndTurn(const double& vel, const double& turn) {
 	_targetTurn = turn;
 	
 	_velocity = true;
-}
-
-
-	
-int CRobotBase::readIR(IR_Index ir) {
-	int raw, val, sum, min, max;
-    float voltFromRaw; //based on 3.3V reference
-    
-    int puntualDistance = -1;
-    
-    switch (_irModels[ir]) {
-    case IR_1080:
-    	for (int i = 0; i < _irSamples; i++) {
-    		raw = analogRead(_irPins[ir]);
-    		voltFromRaw = raw * 3.225806452;
-			val = 27.728 * pow(voltFromRaw / 1000, - 1.2045);
-			//Serial.println(val);
-    		if ( i == 0) {
-    			sum = val;
-    			min = val;
-    			max = val;
-    		}
-    		else {
-				if (val < min) {
-					min = val;
-				}
-				if (val > max) {
-					max = val;
-				}
-				sum = sum + val;
-    		}
-    	}
-    	
-    	if (_irSamples > 2) {
-    		puntualDistance = (sum - min - max) / (_irSamples - 2);
-    	}
-    	else puntualDistance = sum / _irSamples;
-
-    	if (puntualDistance > 80) puntualDistance = 81;
-        if (puntualDistance < 10) puntualDistance  = 9;
-        break;
-        
-        
-    case IR_20150:
-    	for (int i = 0; i < _irSamples; i++) {
-    		raw = analogRead(_irPins[ir]);
-    		voltFromRaw = raw * 3.225806452;
-    		val = 61.573 * pow(voltFromRaw / 1000, - 1.1068);
-    		if (i == 0) {
-    			sum = val;
-    			min = val;
-    			max = val;
-    		}
-    		else {
-				if (val < min) {
-					min = val;
-				}
-				if (val > max) {
-					max = val;
-				}
-				sum = sum + val;
-    		}
-    	}
-
-    	if (_irSamples > 2) {
-    		puntualDistance = (sum - min - max) / (_irSamples - 2);
-    	}
-    	else puntualDistance = sum / _irSamples;
-
-        if (puntualDistance > 150) puntualDistance = 151;
-        if (puntualDistance < 20) puntualDistance  = 19;
-        break;
-    }
-    
-    _irDist[ir] = puntualDistance;  // * _irFact) + _irPrevDist[ir] * (1.0 - _irFact);
-    _irPrevDist[ir] = _irDist[ir];
-    
-    return puntualDistance;
-}
-	
-void CRobotBase::setIRFilter(double factor) {
-	_irFact = factor;
-}
-
-void CRobotBase::readAllIR() {
-	for (int i = 0; i < IR_END; ++i) {
-		readIR((IR_Index)i);
-	}
 }
 
 void CRobotBase::setMaxVel(const double& maxVelocity) {
@@ -608,7 +472,6 @@ void CRobotBase::stop(bool smooth) {
 void CRobotBase::time() {
 	_lastOdom = millis();
 	_lastNav = _lastOdom;
-	_lastIR = _lastOdom;
 }
 
 bool CRobotBase::navDone() {

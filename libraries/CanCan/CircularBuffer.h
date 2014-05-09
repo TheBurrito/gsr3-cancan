@@ -64,22 +64,22 @@ void CircularBuffer<T>::reset() {
 
 template <typename T>
 const T& CircularBuffer<T>::operator[](int i) {
-	return _buf[(i + _head) % _size];
+	return _buf[(i + _tail) % _size];
 }
 
 template <typename T>
 bool CircularBuffer<T>::insertFront(const T& b) {
-	int h = _head - 1;
+	int t = _tail - 1;
+	if (t < 0) t += _size;
 	bool loss = false;
-	if (h < 0) h = _size - 1;
 	
-	if (h == _tail) {
+	if (t == _head) {
 		loss = true;
-		--_tail;
-		if (_tail < 0) _tail = _size - 1;
+		--_head;
+		if (_head < 0) _head += _size;
 	}
 	
-	_buf[_head] = b;
+	_buf[t] = b;
 	
 	return loss;
 }
@@ -91,7 +91,7 @@ bool CircularBuffer<T>::empty() {
 
 template <typename T>
 int CircularBuffer<T>::size() {
-	int s = _tail - _head;
+	int s = _head - _tail;
 	if (s < 0) s += _size;
 	return s;
 }
@@ -118,7 +118,7 @@ bool CircularBuffer<T>::pushBack(const T& b) {
 
 template <typename T>
 bool CircularBuffer<T>::removeFront() {
-    if (_head == _tail) {
+    if (_head == (_tail + 1) % _size) {
         return false;
     }
     

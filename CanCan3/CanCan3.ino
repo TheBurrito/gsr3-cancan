@@ -1,93 +1,139 @@
-#include <RobotBase.h>
-#include <TimedAction.h>
+
 #include <Wire.h>
 #include <LiquidTWI2.h>
 #include <Adafruit_RGBLCDShield.h>
+#include <RobotBase.h>
+#include <Gripper.h>
+#include <ranging.h>
+#include <TimedAction.h>
+#include <Detect.h>
+#include <geometry.h>
+#include <CanCan.h>
 #include <Servo.h>
 #include <Pins.h>
-#include <CircularBuffer.h>
+
+#include <debug.h>
+
 #include <CanCanState.h>
 
-bool DEBUG_useLCD = false;
-bool DEBUG_useSerial = false;
-bool DEBUG_IR = false;
-bool DEBUG_detectCan = false;
-bool DEBUG_sonar = false;
+#define WALLBUFFER (15.0 + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET)
 
-Servo gripper;
-#define SERVO_G_CLOSE 36
-#define SERVO_G_OPEN 88
+TimedAction detectAction = TimedAction(40, doDetect);
 
-struct ArenaSize {
-  float width;
-  float length;
-  Point min;
-  Point max;
-  Point goal;
-};
+bool resetDetect = true;
 
-LiquidTWI2 lcd(0);
-
-#define OFF 0x0
-#define RED 0x1
-#define GREEN 0x2
-#define YELLOW 0x3
-#define BLUE 0x4
-#define VIOLET 0x5
-#define TEAL 0x6
-#define WHITE 0x7
-
-#define ROBOT_GRIP_OFFSET 8.7  // gripper closed position
-#define ROBOT_FRONT_OFFSET 7.3 // to front of case
-#define ROBOT_REAR_OFFSET 10.7 // to rear of case
-#define ROBOT_WHEEL_OFFSET 9.2 // to outside of wheel
-
-float wallBuffer = 10;
-
-int arenaNum = 2;
-const int arenaCount = 3;
-
-ArenaSize arena[arenaCount];
-
-void setArenas() {
-  arena[0] = 
-    {
-      7, 10,
-      {
-        0 + wallBuffer + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET, -7 / 2 * 12 * 2.54 + wallBuffer + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET      }
-      ,
-      {
-        10 * 12 * 2.54 - wallBuffer - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET, 7 / 2 * 12 * 2.54 - wallBuffer - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET      }
-      ,
-      {
-        10 * 12 * 2.54 + 20, 0      }
-    };
-
-    arena[1] = {
-      0, 0, {
-        0, 0      }
-      , {
-        0, 0      }
-      , {
-        0, 0      }
-    };
-
-    arena[2] = {
-      4, 8,
-      {
-        0 + wallBuffer + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET, -4 / 2 * 12 * 2.54 + wallBuffer + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET      }
-      ,
-      {
-        8 * 12 * 2.54 - wallBuffer - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET, 4 / 2 * 12 * 2.54 - wallBuffer - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET      }
-      ,
-      {
-        180 * 12 * 2.54 + 20, 0      }
-    };
+void doDetect() {
+  resetDetect = RobotBase.getVelocity() < 2.0;
+  
+  int dist[4];
+  dist[0] = ranging::getDistance(IRL);
+  dist[1] = ranging::getDistance(IRFL);
+  dist[2] = ranging::getDistance(IRFR);
+  dist[3] = ranging::getDistance(IRR);
+  
+  Pose pose;
+  pose.p.x = RobotBase.getX();
+  pose.p.y = RobotBase.getY();
+  pose.a = RobotBase.getTheta();
+  
+  detect::detectCan(dist, pose, resetDetect);
 }
 
+void initDetect() {
+  detect::initDetection();
+  detect::setEdgeThreshold(10.0);
+  detect::setBounds(arena.min, arena.max);
+  detect::setSensorCount(4);
+  detect::setSensorInfo(0, sonarPose[IRL], 20, 150);
+  detect::setSensorInfo(1, sonarPose[IRFL], 10, 80);
+  //Skip front center sensor for can detection
+  detect::setSensorInfo(2, sonarPose[IRFR], 10, 80);
+  detect::setSensorInfo(3, sonarPose[IRR], 20, 150);
+}
+
+void initBase() {
+  RobotBase.setPID(5, 5, 0);
+  RobotBase.setAccel(50);
+  
+  RobotBase.setVelocityRange(20, 0, 1);
+  RobotBase.setTurnRange(2, 0, 0.2);
+  RobotBase.setOutputRange(400, 5, 70);
+  
+  RobotBase.setTicksPerUnit(71.65267);
+  RobotBase.setWidth(17.4);
+  RobotBase.setNavThresh(2, 0.04);
+  
+  RobotBase.setOdomPeriod(10);
+  RobotBase.setNavPeriod(10);
+}
+
+void initGripper() {
+  Gripper.setPin(SERVO_G);
+  Gripper.setOpen(88);
+  Gripper.setClosed(36);
+  Gripper.setSpeed(1);
+  Gripper.setPeriod(20);
+}
+
+void fillPath() {
+  path.clear();
+  Point p;
+  
+  //7
+  p.x = arena.min.x;
+  p.y = 0;
+  path.push(p);
+  
+  //6
+  p.x = arena.max.x;
+  p.y = 0;
+  path.push(p);
+  
+  //5
+  p.x = arena.max.x;
+  p.y = arena.min.y / 2;
+  path.push(p);
+  
+  //4
+  p.x = arena.min.x;
+  p.y = arena.min.y / 2;
+  path.push(p);
+  
+  //3
+  p.x = arena.min.x;
+  p.y = arena.max.y / 2;
+  path.push(p);
+  
+  //2
+  p.x = arena.max.x;
+  p.y = arena.max.y / 2;
+  path.push(p);
+  
+  //1
+  p.x = arena.max.x;
+  p.y = 0;
+  path.push(p);
+}
+  
 void setup() {
+  initLCD();
+  setArena(2, WALLBUFFER);
+  initDetect();
+  initGripper();
+  initBase();
 }
 
 void loop() {
+  ranging::update();
+  detectAction.check();
+  stateAction.check();
+  Gripper.update();
+  RobotBase.update();
+  
+  debug();
+  
+  if (path.empty()) {
+    fillPath();
+  }
 }
 

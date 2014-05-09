@@ -2,6 +2,10 @@
 
 #include <string.h>
 #include "Arduino.h"
+#include "gsr_lcd.h"
+#include "debug.h"
+
+namespace detect {
 
 void detectCan();
 void addCan(const Point& p);
@@ -31,11 +35,11 @@ const int maxCans = 20;
 CanStore cans[maxCans];
 int numCans = 0;
 
-DetectInfo *detectInfo;
+DetectInfo *detectInfo = 0;
 int sensorCount = 0;
 int nextCan;
 
-int *lastDist;
+int *lastDist = 0;
 float minCanWidth = 4;
 float maxCanWidth = 8;
 
@@ -47,23 +51,24 @@ Point minBounds, maxBounds;
 unsigned long lastDetect = 0;
 unsigned long detectMS = 40;
 
-void detectCan(int* dist, const Pose& pose) {
-	unsigned long curMillis = millis();
+void setBounds(Point min, Point max) {
+	minBounds = min;
+	maxBounds = max;
+}
+
+void detectCan(int* dist, const Pose& pose, bool reset) {
 	
-	if (lastDetect + detectMS < curMillis) {
-		return;
-	}
-	
-	lastDetect = curMillis;
-	
+	//iterate over each sensor used for can detection
 	for (int i = 0; i < sensorCount; ++i) {
 		int diff = dist[i] - detectInfo[i].lastDist;
 		detectInfo[i].lastDist = dist[i];
 		
+		//if (reset) continue;
+		
 		bool edge = false;
 		
 		if (dist[i] > detectInfo[i].maxDist || dist[i] < detectInfo[i].minDist) {
-			edge = true;
+			edge = detectInfo[i].active;
 		} else {
 			Point p;
 			p.x = dist[i] * (cos(detectInfo[i].pose.a) ) + detectInfo[i].pose.p.x;
@@ -73,8 +78,14 @@ void detectCan(int* dist, const Pose& pose) {
 			p.y += pose.p.y;
 			
 			if (p.x > maxBounds.x || p.x < minBounds.x || p.y > maxBounds.y || p.y < minBounds.y) {
-				edge = true;
+				edge = detectInfo[i].active;
 			} else if (!detectInfo[i].active || diff < -edgeThresh) {
+			
+				if (DEBUG_detect) {
+					//setLCD("Start ");
+					//lcd.print(diff);
+				}
+				
 				detectInfo[i].start.x = p.x;
 				detectInfo[i].start.y = p.y;
 				detectInfo[i].last.x = p.x;
@@ -89,6 +100,11 @@ void detectCan(int* dist, const Pose& pose) {
 		}
 		
 		if (edge) {
+			if (DEBUG_detect) {
+				//setLCD("Stop ");
+				//lcd.print(diff);
+			}
+			
 			double ax = detectInfo[i].start.x - detectInfo[i].last.x;
 			double ay = detectInfo[i].start.y - detectInfo[i].last.y;
 			detectInfo[i].width = hypot(ax, ay);
@@ -103,6 +119,7 @@ void detectCan(int* dist, const Pose& pose) {
 			p.y = (detectInfo[i].start.y + detectInfo[i].last.y) / 2;
 			
 			addCan(p);
+			lcd.clear();
 		}
 	}
 }
@@ -117,6 +134,8 @@ void initDetection() {
 			cans[i].next = -1;
 		}
 	}
+	
+	numCans = 0;
 }
 
 void setEdgeThreshold(float thresh) {
@@ -206,6 +225,8 @@ void addCan(const Point &p) {
 	cans[nextCan].can.ts = millis();
 	cans[nextCan].can.p = p;
 	nextCan = cans[nextCan].next;
+	
+	++numCans;
 }
 
 const Point& getCan(int i) {
@@ -213,11 +234,15 @@ const Point& getCan(int i) {
 }
 	
 void removeCan(int i) {
-	if (i < 0 || i > maxCans) {
+	if (i < 0 || i > maxCans || cans[i].can.ts == 0) {
 		return;
 	}
 	
 	cans[i].can.ts = 0;
 	cans[i].next = nextCan;
 	nextCan = i;
+	
+	--numCans;
+}
+
 }
