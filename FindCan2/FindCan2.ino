@@ -11,8 +11,8 @@
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
 #define DEBUG_DETECT_CAN false
-#define DEBUG_SONAR true
-#define DEBUG_ROUTE true
+#define DEBUG_SONAR false
+#define DEBUG_ROUTE false
 
 int objMinWidth = 4;
 int objMaxWidth = 8;
@@ -52,7 +52,7 @@ LiquidTWI2 lcd(0);
 #define WHITE 0x7
 
 // Distances from robot center to outer dimensions
-#define ROBOT_GRIP_OFFSET 8.7  // gripper closed position#define ROBOT_FRONT_OFFSET 7.3 // to front of case#define ROBOT_REAR_OFFSET 10.7 // to rear of case#define ROBOT_WHEEL_OFFSET 9.2 // to outside of wheel#define ROBOT_SONAR_OFFSET 6.0 // to end of sonar#define WALL_BUFFER 10 // padding around walls to exclude from object detection/*There are three known arena sizes
+#define ROBOT_GRIP_OFFSET 8.7  // gripper closed position#define ROBOT_FRONT_OFFSET 7.3 // to front of case#define ROBOT_REAR_OFFSET 10.7 // to rear of case#define ROBOT_WHEEL_OFFSET 9.2 // to outside of wheel#define ROBOT_SONAR_OFFSET 6.0 // to end of sonar#define WALL_BUFFER 5 // padding around walls to exclude from object detection/*There are three known arena sizes
 1 - official arena size 7'x12'
 2 - contigent arena size ?x?
 3 - home arena size 4'x8'
@@ -62,9 +62,10 @@ LiquidTWI2 lcd(0);
 #if ARENA == 1 // ft * in/ft * cm/in#define ARENA_W 7#define ARENA_L 10
 #define MAX_X ARENA_L * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
 #define MAX_Y ARENA_W / 2 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
-#define MIN_X 0 - ROBOT_FRONT_OFFSET + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
+#define MIN_X 0 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
 #define MIN_Y -ARENA_W / 2 * 12 * 2.54 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
-#define GOAL_X ARENA_L * 12 * 2.54 + 20
+#define GOAL_LINE ARENA_L * 12 * 2.54
+#define GOAL_X GOAL_LINE + 10
 #define GOAL_Y 0
 #endif
 
@@ -73,12 +74,13 @@ LiquidTWI2 lcd(0);
 #define MIN_Y 
 #endif
 
-#if ARENA == 3 // ft * in/ft * cm/in#define ARENA_W 4#define ARENA_L 8
+#if ARENA == 3 // ft * in/ft * cm/in#define ARENA_W 4#define ARENA_L 6
 #define MAX_X ARENA_L * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET - 13
 #define MAX_Y ARENA_W / 2 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
 #define MIN_X WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET 
 #define MIN_Y -ARENA_W / 2 * 12 * 2.54 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
-#define GOAL_X MAX_X + 5
+#define GOAL_LINE ARENA_L * 12 * 2.54
+#define GOAL_X GOAL_LINE + 10
 #define GOAL_Y 0
 #endif
 
@@ -89,13 +91,18 @@ typedef enum {
     mDriveCan,
     mGrabCan,
     mDriveGoal,
+    mDriveGoalLeft,
+    mDriveGoalRight,
+    mTurnToGoal,
+    mTurnToGoalLeft,
+    mTurnToGoalRight,
     mDriveInGoal,
+    mDriveInGoalLeft,
+    mDriveInGoalRight,
     mDropCan,
     mBackup,
     mStop,
     mReset,
-    mEvadeRight,
-    mEvadeLeft,
     mReturnToPos
 }Mode;
 
@@ -161,8 +168,9 @@ TimedAction chooseCanAction = TimedAction(700, chooseCan);
 TimedAction celebrateAction = TimedAction(150, celebrate);
 TimedAction debugSonarAction = TimedAction(1000, debugSonar);
 TimedAction pingAction = TimedAction(200, ping);
+TimedAction bumperAction = TimedAction(10, checkBumpers);
 
-#include "ObjectAvoidance.h"
+//#include "ObjectAvoidance.h"
 #include "Inits.h"
 
 void setup() {
@@ -188,8 +196,9 @@ void loop() {
         chooseCanAction.check();
         irAction.check();
         pingAction.check();
-        lookForObstacleAction.check();
+//        lookForObstacleAction.check();
         debugSonarAction.check();
+        bumperAction.check();
 
         if (celebrateGoal)
             celebrateAction.check();
@@ -197,29 +206,6 @@ void loop() {
             mode = mReset;
         }
 
-        if (digitalRead(IRB_FL) == 0) {
-            if (mode != mBackup && mode != mDropCan && mode != mGrabCan
-                    && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
-                if (mode != mEvadeRight)
-                    nextMode = lastMode;
-                if (nextMode == mDriveCan)
-                    nextMode = mWander;
-                obstacleLeft = true;
-                mode = mEvadeRight;
-            }
-        }
-
-        if (digitalRead(IRB_FR) == 0) {
-            if (mode != mBackup && mode != mDropCan && mode != mGrabCan
-                    && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
-                if (mode != mEvadeLeft)
-                    nextMode = lastMode;
-                if (nextMode == mDriveCan)
-                    nextMode = mWander;
-                obstacleRight = true;
-                mode = mEvadeLeft;
-            }
-        }
     } // if !mWaitStart
 
     newState = (lastMode != mode) || restart;
@@ -252,7 +238,6 @@ void loop() {
 
     case mWander:
         RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
-        gripState = gOpen;
         if (newState) {
             lcd.setBacklight(YELLOW);
             RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y,
@@ -261,6 +246,7 @@ void loop() {
             if (digitalRead(IRB_F) == 0 && curGrip == SERVO_G_CLOSE) {
                 mode = mDriveGoal;
             } else if (targetCan != -1) {
+                RobotBase.stop(true);
                 if (!returnPos.active) {
                     returnPos.active = true;
                     returnPos.pos.x = RobotBase.getX();
@@ -314,17 +300,86 @@ void loop() {
         if (newState) {
             lcd.setBacklight(GREEN);
             removeCan(targetCan);
-            RobotBase.turnToAndDrive(GOAL_X - 20, GOAL_Y, false);
+            RobotBase.turnToAndDrive(GOAL_LINE - 30, GOAL_Y, false);
+        } else if (RobotBase.navDone()) {
+            mode = mTurnToGoal;
+        }
+        break;
+
+    case mDriveGoalLeft:
+        RobotBase.setMax(goalSpeed, 2.0); //cm/s, Rad/s
+        if (newState) {
+            RobotBase.turnToAndDrive(GOAL_LINE - 30, GOAL_Y + 30, false);
+        } else if (RobotBase.navDone()) {
+            RobotBase.turnTo(GOAL_LINE + 10, GOAL_Y + 30);
+            mode = mTurnToGoalLeft;
+        }
+        break;
+
+    case mDriveGoalRight:
+        RobotBase.setMax(goalSpeed, 2.0); //cm/s, Rad/s
+        if (newState) {
+            RobotBase.turnToAndDrive(GOAL_LINE - 30, GOAL_Y - 30, false);
+        } else if (RobotBase.navDone()) {
+            mode = mTurnToGoalRight;
+        }
+        break;
+
+    case mTurnToGoal:
+        if (newState) {
+            RobotBase.turnTo(GOAL_X, GOAL_Y, false);
         } else if (RobotBase.navDone()) {
             mode = mDriveInGoal;
         }
         break;
 
-    case mDriveInGoal:
-        RobotBase.setMax(20, 2.0); //cm/s, Rad/s
+    case mTurnToGoalLeft:
         if (newState) {
-            lcd.setBacklight(GREEN);
-            RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
+            RobotBase.turnTo(GOAL_X, GOAL_Y + 25, false);
+        } else if (RobotBase.navDone()) {
+            mode = mDriveInGoalLeft;
+        }
+        break;
+
+    case mTurnToGoalRight:
+        if (newState) {
+            RobotBase.turnTo(GOAL_X, GOAL_Y - 25, false);
+        } else if (RobotBase.navDone()) {
+            mode = mDriveInGoalRight;
+        }
+        break;
+
+    case mDriveInGoal:
+        if (newState) {
+            if (sonarDist > 30) {
+                RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
+            } else {
+                mode = mDriveGoalLeft;
+            }
+        } else if (RobotBase.navDone()) {
+            mode = mDropCan;
+        }
+        break;
+
+    case mDriveInGoalLeft:
+        if (newState) {
+            if (sonarDist > 30) {
+                RobotBase.turnToAndDrive(GOAL_X, GOAL_Y + 25, false);
+            } else {
+                mode = mDriveGoalRight;
+            }
+        } else if (RobotBase.navDone()) {
+            mode = mDropCan;
+        }
+        break;
+
+    case mDriveInGoalRight:
+        if (newState) {
+            if (sonarDist > 30) {
+                RobotBase.turnToAndDrive(GOAL_X, GOAL_Y - 25, false);
+            } else {
+                mode = mDriveGoalRight;
+            }
         } else if (RobotBase.navDone()) {
             mode = mDropCan;
         }
@@ -347,7 +402,10 @@ void loop() {
         } else {
             if (RobotBase.getX() < GOAL_X - 10) {
                 RobotBase.stop(false);
-                mode = mWander;
+                if (returnPos.active)
+                    mode = mReturnToPos;
+                else
+                    mode = mWander;
             }
         }
         break;
@@ -366,28 +424,6 @@ void loop() {
         } else if (RobotBase.navDone()) {
             mode = mWander;
         }
-        break;
-
-    case mEvadeRight:
-#if DEBUG_ROUTE
-        Serial.println("Evade Right");
-#endif
-        RobotBase.setMax(15, 2.0); //cm/s, Rad/s
-        if (newState) {
-            RobotBase.setTurnAdjust(0.5);
-            gripState = gClose;
-        } 
-        break;
-
-    case mEvadeLeft:
-#if DEBUG_ROUTE
-        Serial.println("Evade Left");
-#endif
-        RobotBase.setMax(15, 2.0); //cm/s, Rad/s
-        if (newState) {
-            RobotBase.setTurnAdjust(-0.5);
-            gripState = gClose;
-        } 
         break;
 
     case mReturnToPos:
@@ -418,7 +454,7 @@ void detectCan(int sensor, int curDist) {
     if (RobotBase.getVelocity() < 2.0)
         return; // don't detect cans if we'er not rolling forward
     bool edgeFound = false;
-    static int objDistThresh = 10;
+    static int objDistThresh = 20;
     int diff = curDist - obj[sensor].lastDist;
     obj[sensor].lastDist = curDist;
 
@@ -660,6 +696,15 @@ void gripper() {
     servoG.write(curGrip);
 }
 
+void checkBumpers() {
+    if (digitalRead(IRB_FL) == 0 || digitalRead(IRB_FR) == 0 || digitalRead(IRB_F) == 0) {
+        if (mode != mBackup && mode != mDropCan && mode != mGrabCan
+                && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
+            gripState = gClose;
+        }
+    }
+}
+
 void celebrate() {
     switch (cCycle) {
     case 1:
@@ -759,3 +804,10 @@ void debugSonar() {
 #endif
 }
 
+void nextWayPt() {
+    if (wayPt == wayPtsCnt - 1) {
+        wayPt = 0;
+    } else
+        wayPt++;
+    restart = true;
+}

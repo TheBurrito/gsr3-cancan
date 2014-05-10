@@ -15,7 +15,7 @@ void canStorageInit() {
 }
 
 void wayPtInit() {
-    wayPts[0].pos.x = MAX_X;
+    wayPts[0].pos.x = GOAL_LINE / 2;
     wayPts[0].pos.y = 0;
     wayPts[1].pos.x = MAX_X;
     wayPts[1].pos.y = MAX_Y / 2;
@@ -25,10 +25,14 @@ void wayPtInit() {
     wayPts[3].pos.y = MIN_Y / 2;
     wayPts[4].pos.x = MAX_X;
     wayPts[4].pos.y = MIN_Y / 2;
-    wayPts[5].pos.x = MAX_X;
-    wayPts[5].pos.y = 0;
-    wayPts[6].pos.x = MIN_X;
-    wayPts[6].pos.y = 0;
+    wayPts[5].pos.x = MIN_X;
+    wayPts[5].pos.y = MAX_Y;
+    wayPts[6].pos.x = MAX_X;
+    wayPts[6].pos.y = MAX_Y;
+    wayPts[7].pos.x = MIN_X;
+    wayPts[7].pos.y = MIN_Y;
+    wayPts[8].pos.x = MAX_X;
+    wayPts[8].pos.y = MIN_Y;
 }
 
 void sensorOffsetInit() {
