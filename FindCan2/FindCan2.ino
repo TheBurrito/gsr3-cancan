@@ -11,7 +11,8 @@
 #define DEBUG_USE_SERIAL false
 #define DEBUG_IR false
 #define DEBUG_DETECT_CAN false
-#define DEBUG_SONAR false
+#define DEBUG_SONAR true
+#define DEBUG_ROUTE true
 
 int objMinWidth = 4;
 int objMaxWidth = 8;
@@ -117,16 +118,16 @@ bool celebrateGoal = false;
 int cCycle = 1;
 
 struct canInfo {
-    unsigned long ts;  // timestamp
+    unsigned long ts; // timestamp
     Point pos;
     double distToGoal;
     int next;
 };
 const int canCapacity = 20;
 canInfo cans[canCapacity];
-int targetCan = -1;  // index for cans[]
+int targetCan = -1; // index for cans[]
 int nextCan = 0;
-bool firstCan = true;  // flag used for fist can we search for
+bool firstCan = true; // flag used for fist can we search for
 
 uint8_t buttons;
 
@@ -143,7 +144,7 @@ int wayPt = 0;
 int errorThresh = 5;
 int errorCnt = 0;
 
-double dXcan, dYcan, dHcan;  // distance to can calculations
+double dXcan, dYcan, dHcan; // distance to can calculations
 
 int scanSpeed = 20;
 int goalSpeed = 45;
@@ -162,7 +163,7 @@ TimedAction debugSonarAction = TimedAction(1000, debugSonar);
 TimedAction pingAction = TimedAction(200, ping);
 
 #include "ObjectAvoidance.h"
-#include "inits.h"
+#include "Inits.h"
 
 void setup() {
     Serial.begin(115200);
@@ -219,7 +220,7 @@ void loop() {
                 mode = mEvadeLeft;
             }
         }
-    }  // if !mWaitStart
+    } // if !mWaitStart
 
     newState = (lastMode != mode) || restart;
     restart = false;
@@ -251,6 +252,7 @@ void loop() {
 
     case mWander:
         RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
+        gripState = gOpen;
         if (newState) {
             lcd.setBacklight(YELLOW);
             RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y,
@@ -367,21 +369,25 @@ void loop() {
         break;
 
     case mEvadeRight:
+#if DEBUG_ROUTE
+        Serial.println("Evade Right");
+#endif
+        RobotBase.setMax(15, 2.0); //cm/s, Rad/s
         if (newState) {
-            findRoute();
+            RobotBase.setTurnAdjust(0.5);
             gripState = gClose;
-        } else if (RobotBase.navDone()) {
-            mode = nextMode;
-        }
+        } 
         break;
 
     case mEvadeLeft:
+#if DEBUG_ROUTE
+        Serial.println("Evade Left");
+#endif
+        RobotBase.setMax(15, 2.0); //cm/s, Rad/s
         if (newState) {
-            findRoute();
+            RobotBase.setTurnAdjust(-0.5);
             gripState = gClose;
-        } else if (RobotBase.navDone()) {
-            mode = nextMode;
-        }
+        } 
         break;
 
     case mReturnToPos:
@@ -401,14 +407,14 @@ void loop() {
 
         break;
 
-    }  // close switch mode
-}  // close loop
+    } // close switch mode
+} // close loop
 
 void detectCan(int sensor, int curDist) {
     if (mode != mWander && mode != mReturnToPos)
         return;
     if (sensor == IRF)
-        return;  // don't try to detect cans by width with the front sensor
+        return; // don't try to detect cans by width with the front sensor
     if (RobotBase.getVelocity() < 2.0)
         return; // don't detect cans if we'er not rolling forward
     bool edgeFound = false;
@@ -421,7 +427,7 @@ void detectCan(int sensor, int curDist) {
 
     if (sensor == 0 || sensor == 4) {
         min = 20;
-        max = 140;  // too many false postives if we scan all the way out to 150
+        max = 140; // too many false postives if we scan all the way out to 150
     }
 
     if (curDist > min && curDist < max) { // ignore values outside the sensors specs
@@ -459,7 +465,7 @@ void detectCan(int sensor, int curDist) {
                 obj[sensor].active = true;
             }
 
-            else if (diff < -objDistThresh) {  // found something closer
+            else if (diff < -objDistThresh) { // found something closer
 #if DEBUG_DETECT_CAN       
                     Serial.print("IR: ");
                     Serial.print(sensor);
@@ -492,7 +498,7 @@ void detectCan(int sensor, int curDist) {
             }
         }
 
-    }  // endif sensor reading within specs
+    } // endif sensor reading within specs
     else {
         if (obj[sensor].active) {
             edgeFound = true;
@@ -507,7 +513,7 @@ void detectCan(int sensor, int curDist) {
         obj[sensor].width = hypot(dX, dY);
 
         if (obj[sensor].width > objMinWidth
-                && obj[sensor].width < objMaxWidth) {  // I think it's a can
+                && obj[sensor].width < objMaxWidth) { // I think it's a can
             float posX = (obj[sensor].start.x + obj[sensor].last.x) / 2;
             float posY = (obj[sensor].start.y + obj[sensor].last.y) / 2;
 #if DEBUG_DETECT_CAN   
@@ -557,7 +563,7 @@ void chooseCan() {
                         dist = _dist;
                         targetCan = i;
                     }
-                } else {  // not first can
+                } else { // not first can
                     if (cans[i].distToGoal < dist) {
                         dist = cans[i].distToGoal;
                         targetCan = i;
@@ -576,7 +582,7 @@ void readIrSensors() {
 }
 
 void addCan(float x, float y) {
-    bool duplicate = false;  // prevent duplicate cans in the list
+    bool duplicate = false; // prevent duplicate cans in the list
     for (int i = 0; i < canCapacity; i++) {
         if (!duplicate) {
             if (cans[i].ts != 0) {
@@ -588,7 +594,7 @@ void addCan(float x, float y) {
         }
     }
 
-    if (!duplicate) {  // if the can is not a duplicate add it to the list
+    if (!duplicate) { // if the can is not a duplicate add it to the list
         double dX = GOAL_X - x;
         double dY = GOAL_Y - y;
         double distToGoal = hypot(dX, dY);
@@ -598,7 +604,7 @@ void addCan(float x, float y) {
         cans[nextCan].pos.y = y;
         cans[nextCan].distToGoal = distToGoal;
         nextCan = cans[nextCan].next;
-        if (nextCan == -1) {  // our can capacity is full clear out an old one
+        if (nextCan == -1) { // our can capacity is full clear out an old one
             // ToDo: write a function that searches for oldest timestamp
         }
     } else {
