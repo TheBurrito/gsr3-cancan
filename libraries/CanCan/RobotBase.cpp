@@ -90,7 +90,7 @@ void CRobotBase::setTurnRange(double maxTurn, double deadTurn, double minTurn) {
 }
 
 void CRobotBase::setTurnAdjust(double turnAdjust) {
-    _turnAdjust = turnAdjust;
+    //_turnAdjust = turnAdjust;
 }
 
 void CRobotBase::setTicksPerUnit(const double& tpu) {
@@ -463,8 +463,8 @@ void CRobotBase::update() {
     }
 }
 
-void CRobotBase::setVelocityAndTurn(const double& vel, const double& turn) {
-    stop(false);
+void CRobotBase::setVelocityAndTurn(const double& vel, const double& turn, bool smooth) {
+    stop(smooth);
 
     _targetVelocity = vel;
     _targetTurn = turn;
@@ -561,6 +561,10 @@ void CRobotBase::readAllIR() {
 
 void CRobotBase::setMaxVel(const double& maxVelocity) {
     _maxVel = maxVelocity;
+}
+
+double CRobotBase::getMaxVel() {
+	return _maxVel;
 }
 
 void CRobotBase::setMaxTurn(const double& maxTurn) {

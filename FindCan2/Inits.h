@@ -48,6 +48,10 @@ void sensorOffsetInit() {
     sensors[IRR].offset.x = 0;
     sensors[IRR].offset.y = -8.0;
     sensors[IRR].angle = -90 * PI / 180;
+    
+    sonarPose.offset.x = ROBOT_FRONT_OFFSET + ROBOT_SONAR_OFFSET;
+    sonarPose.offset.y = 0;
+    sonarPose.angle = 0;
 }
 
 void robotBaseInit() {

@@ -49,6 +49,8 @@ public:
     void setMax(const double& maxVelocity, const double& maxTurn);
     void setMaxVel(const double& maxVelocity);
     void setMaxTurn(const double& maxTurn);
+    
+    double getMaxVel();
 
     void setVelocityRange(double maxVel, double deadVel, double minVel);
     void setTurnRange(double maxTurn, double deadTurn, double minTurn);
@@ -116,7 +118,7 @@ public:
     void turnTo(const double& theta, bool smooth);
     void turnTo(const double& x, const double& y, bool smooth);
 
-    void setVelocityAndTurn(const double& vel, const double& turn);
+    void setVelocityAndTurn(const double& vel, const double& turn, bool smooth);
 
     void stop(bool smooth);
 
@@ -186,5 +188,18 @@ private:
 };
 
 extern CRobotBase RobotBase;
+
+inline Point getSensorPoint(float range, const Pose& sPose) {
+	Point p;
+	p.x = range * (cos(sPose.angle)) + sPose.offset.x;
+    p.y = range * (sin(sPose.angle)) + sPose.offset.y;
+
+    p = rotate(p, RobotBase.getTheta());
+    
+    p.x += RobotBase.getX();
+    p.y += RobotBase.getY();
+    
+    return p;
+}
 
 #endif //_RobotBase_h_
