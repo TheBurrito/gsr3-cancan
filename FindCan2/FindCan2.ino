@@ -9,10 +9,10 @@
 
 #define DEBUG_USE_LCD true
 #define DEBUG_USE_SERIAL false
-#define DEBUG_IR false
+#define DEBUG_IR true
 #define DEBUG_DETECT_CAN false
-#define DEBUG_SONAR false
-#define DEBUG_ROUTE true
+#define DEBUG_SONAR true
+#define DEBUG_ROUTE false
 
 int objMinWidth = 4;
 int objMaxWidth = 8;
@@ -146,7 +146,7 @@ Pose sonarPose;
 struct wayPtsStruct {
     Point pos;
 };
-const int wayPtsCnt = 7;
+const int wayPtsCnt = 9;
 wayPtsStruct wayPts[wayPtsCnt];
 int wayPt = 0;
 
@@ -175,7 +175,7 @@ TimedAction bumperAction = TimedAction(10, checkBumpers);
 
 bool takeOver = false;
 
-#include "DAvoid.h"
+//#include "DAvoid.h"
 #include "Inits.h"
 
 void setup() {
@@ -201,7 +201,7 @@ void loop() {
         chooseCanAction.check();
         irAction.check();
         pingAction.check();
-        lookForObstacleAction.check();
+//        lookForObstacleAction.check();
         debugSonarAction.check();
         bumperAction.check();
 
@@ -209,30 +209,6 @@ void loop() {
             celebrateAction.check();
         if (errorCnt > errorThresh) {
             mode = mReset;
-        }
-
-        if (digitalRead(IRB_FL) == 0) {
-            if (mode != mBackup && mode != mDropCan && mode != mGrabCan
-                    && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
-                if (mode != mEvadeRight)
-                    nextMode = lastMode;
-                if (nextMode == mDriveCan)
-                    nextMode = mWander;
-                obstacleLeft = true;
-                mode = mEvadeRight;
-            }
-        }
-
-        if (digitalRead(IRB_FR) == 0) {
-            if (mode != mBackup && mode != mDropCan && mode != mGrabCan
-                    && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
-                if (mode != mEvadeLeft)
-                    nextMode = lastMode;
-                if (nextMode == mDriveCan)
-                    nextMode = mWander;
-                obstacleRight = true;
-                mode = mEvadeLeft;
-            }
         }
     } // if !mWaitStart
 
@@ -383,11 +359,37 @@ void loop() {
         break;
 
     case mDriveInGoal:
-        RobotBase.setMax(20, 2.0); //cm/s, Rad/s
         if (newState) {
-            lcd.setBacklight(GREEN);
-            RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
-        } else if (navDone) {
+            if (sonarDist > 30) {
+                RobotBase.turnToAndDrive(GOAL_X, GOAL_Y, false);
+            } else {
+                mode = mDriveGoalLeft;
+            }
+        } else if (RobotBase.navDone()) {
+            mode = mDropCan;
+        }
+        break;
+
+    case mDriveInGoalLeft:
+        if (newState) {
+            if (sonarDist > 30) {
+                RobotBase.turnToAndDrive(GOAL_X, GOAL_Y + 25, false);
+            } else {
+                mode = mDriveGoalRight;
+            }
+        } else if (RobotBase.navDone()) {
+            mode = mDropCan;
+        }
+        break;
+
+    case mDriveInGoalRight:
+        if (newState) {
+            if (sonarDist > 30) {
+                RobotBase.turnToAndDrive(GOAL_X, GOAL_Y - 25, false);
+            } else {
+                mode = mDriveGoalRight;
+            }
+        } else if (RobotBase.navDone()) {
             mode = mDropCan;
         }
         break;
