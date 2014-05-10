@@ -216,7 +216,7 @@ void loop() {
     restart = false;
 
     lastMode = mode;
-    
+
     bool navDone = RobotBase.navDone() && !takeOver;
 
     switch (mode) {
@@ -244,7 +244,7 @@ void loop() {
 
     case mWander:
         RobotBase.setMax(scanSpeed, 2.0); //cm/s, Rad/s
-        
+
         if (newState) {
             lcd.setBacklight(YELLOW);
             RobotBase.turnToAndDrive(wayPts[wayPt].pos.x, wayPts[wayPt].pos.y,
@@ -262,9 +262,9 @@ void loop() {
                 mode = mDriveCan;
             } else if (navDone) {
                 nextWayPt();
-            } else if (curGrip == SERVO_G_CLOSE){
-            	gripState = gOpen;
-        	}
+            } else if (curGrip == SERVO_G_CLOSE) {
+                gripState = gOpen;
+            }
         }
         break;
 
@@ -443,7 +443,7 @@ void loop() {
         if (newState) {
             RobotBase.setTurnAdjust(0.5);
             gripState = gClose;
-        } 
+        }
         break;
 
     case mEvadeLeft:
@@ -454,7 +454,7 @@ void loop() {
         if (newState) {
             RobotBase.setTurnAdjust(-0.5);
             gripState = gClose;
-        } 
+        }
         break;
 
     case mReturnToPos:
@@ -728,9 +728,9 @@ void gripper() {
 }
 
 void checkBumpers() {
-    if (digitalRead(IRB_FL) == 0 || digitalRead(IRB_FR) == 0 || digitalRead(IRB_F) == 0) {
-        if (mode != mBackup && mode != mDropCan && mode != mGrabCan
-                && mode != mDriveCan && RobotBase.getX() < MAX_X - 15) {
+    if (mode == mWander && RobotBase.getX() < GOAL_LINE) {
+        if (digitalRead(IRB_FL) == 0 || digitalRead(IRB_FR) == 0
+                || digitalRead(IRB_F) == 0) {
             gripState = gClose;
         }
     }
@@ -823,7 +823,7 @@ void debugIr() {
 void debugSonar() {
 #if DEBUG_SONAR
 #if DEBUG_USE_LCD
-    
+
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("   ");
