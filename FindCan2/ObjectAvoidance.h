@@ -282,10 +282,11 @@ void lookForObstacle() {
                 turnAdjust = turnAdjust / 2;
             }
             RobotBase.setTurnAdjust(turnAdjust);
-            if (mode == mEvadeLeft || mode == mEvadeRight) {
-                mode = nextMode;
-            }
         } else {
+            if (mode != mEvadeRight)
+                nextMode = lastMode;
+            if (nextMode == mDriveCan)
+                nextMode = mWander;
             findRoute();
         }
     } // if mode...
@@ -326,9 +327,7 @@ void adjustRoute() {
         }
     }
 
-    obstacleCenter = false;
-    obstacleLeft = false;
-    obstacleRight = false;
+
 }
 
 TimedAction lookForObstacleAction = TimedAction(300, lookForObstacle);
