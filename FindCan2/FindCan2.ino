@@ -65,7 +65,7 @@ LiquidTWI2 lcd(0);
 #define MIN_X 0 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
 #define MIN_Y -ARENA_W / 2 * 12 * 2.54 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
 #define GOAL_LINE ARENA_L * 12 * 2.54
-#define GOAL_X GOAL_LINE + 10
+#define GOAL_X GOAL_LINE + 20
 #define GOAL_Y 0
 #endif
 
@@ -75,12 +75,12 @@ LiquidTWI2 lcd(0);
 #endif
 
 #if ARENA == 3 // ft * in/ft * cm/in#define ARENA_W 4#define ARENA_L 6
-#define MAX_X ARENA_L * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET - 13
-#define MAX_Y ARENA_W / 2 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
+#define MAX_X ARENA_L * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
+#define MAX_Y ((ARENA_W / 2) * 12 * 2.54) - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
 #define MIN_X WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET 
-#define MIN_Y -ARENA_W / 2 * 12 * 2.54 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
+#define MIN_Y (-(ARENA_W / 2) * 12 * 2.54) + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
 #define GOAL_LINE ARENA_L * 12 * 2.54
-#define GOAL_X GOAL_LINE + 10
+#define GOAL_X GOAL_LINE + 20
 #define GOAL_Y 0
 #endif
 
@@ -262,7 +262,7 @@ void loop() {
                 mode = mDriveCan;
             } else if (navDone) {
                 nextWayPt();
-            } else {
+            } else if (curGrip == SERVO_G_CLOSE){
             	gripState = gOpen;
         	}
         }
@@ -704,7 +704,7 @@ void readSonarPulse() {
     } else
         pulseEnd = micros();
     sonarDist = ((pulseEnd - pulseStart) / 147.0) * 2.54;
-    if (sonarDist <= 0)
+    if (sonarDist <= 1)
         sonarDist = 300;
 }
 
