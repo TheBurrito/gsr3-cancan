@@ -23,12 +23,17 @@ void setArena(int i, double buffer) {
 			break;
 	}
     
-    arena = {
-      arena_w, arena_l,
-      {0 + buffer, -arena_w / 2 * 12 * 2.54 + buffer},
-      {arena_l * 12 * 2.54 - buffer, arena_w / 2 * 12 * 2.54 - buffer},
-      {arena_l * 12 * 2.54 - buffer - 10, 0}
-    };
+    arena.width = arena_w;
+    arena.length = arena_l;
+    
+    arena.max.x = arena_l * 12 * 2.54 - buffer - 13;
+    arena.max.y = arena_w / 2 * 12 * 2.54 - buffer;
+    
+    arena.min.x = 0 + buffer;
+    arena.min.y = -arena_w / 2 * 12 * 2.54 + buffer;
+    
+    arena.goal.x = arena.max.x + 5;
+    arena.goal.y = 0;
 }
 
 //}

@@ -4,19 +4,20 @@
 #include "ranging.h"
 
 bool DEBUG_useLCD = true;
-bool DEBUG_useSerial = false;
+bool DEBUG_useSerial = true;
 
-bool DEBUG_IR = false;
+bool DEBUG_IR = true;
 bool DEBUG_detect = true;
 bool DEBUG_sonar = false;
 bool DEBUG_path = false;
 bool DEBUG_state = false;
+bool DEBUG_gripper = true;
 
 void doDebug();
 void debugIR();
 void debugPath();
 
-TimedAction debugAction(500, doDebug);
+TimedAction debugAction(200, doDebug);
 
 void doDebug() {
 	if (DEBUG_IR) {

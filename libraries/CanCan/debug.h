@@ -9,6 +9,7 @@ extern bool DEBUG_detect;
 extern bool DEBUG_sonar;
 extern bool DEBUG_path;
 extern bool DEBUG_state;
+extern bool DEBUG_gripper;
 
 void debug();
 

@@ -3,7 +3,7 @@
 
 namespace ranging {
 
-unsigned long lastUpdate = 0, period = 8;
+unsigned long lastUpdate = 0, period = 40;
 int curSensor = IRL;
 
 SharpIR irL(IR_L, 1, 0, 20150);
@@ -20,11 +20,8 @@ void update() {
 	unsigned long curMillis = millis();
 	
 	if (lastUpdate + period <= curMillis) {
-		dist[curSensor] = ir[curSensor]->distance();
-
-		++curSensor;
-		if (curSensor == IR_END) {
-			curSensor = 0;
+		for (int i = 0; i < IR_END; ++i) {
+			dist[i] = ir[i]->distance();
 		}
 	}
 }

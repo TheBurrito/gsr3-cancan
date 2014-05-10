@@ -56,12 +56,29 @@ void setBounds(Point min, Point max) {
 	maxBounds = max;
 }
 
+void resetInfo(int i) {
+	detectInfo[i].start.x = 0;
+	detectInfo[i].start.y = 0;
+	detectInfo[i].last.x = 0;
+	detectInfo[i].last.y = 0;
+	detectInfo[i].width = 0;
+	detectInfo[i].active = false;
+}
+
 void detectCan(int* dist, const Pose& pose, bool reset) {
 	
 	//iterate over each sensor used for can detection
 	for (int i = 0; i < sensorCount; ++i) {
 		int diff = dist[i] - detectInfo[i].lastDist;
 		detectInfo[i].lastDist = dist[i];
+		
+		if (DEBUG_useSerial && DEBUG_detect) {
+			Serial.print(i);
+			Serial.print(": ");
+			Serial.print(dist[i]);
+			Serial.print("/");
+			Serial.print(diff);
+		}
 		
 		//if (reset) continue;
 		
@@ -71,23 +88,20 @@ void detectCan(int* dist, const Pose& pose, bool reset) {
 			edge = detectInfo[i].active;
 		} else {
 			Point p;
-			p.x = dist[i] * (cos(detectInfo[i].pose.a) ) + detectInfo[i].pose.p.x;
-			p.y = dist[i] * (sin(detectInfo[i].pose.a) ) + detectInfo[i].pose.p.y;
+			//rel
+			p.x = dist[i] * cos(detectInfo[i].pose.a) + detectInfo[i].pose.p.x;
+			p.y = dist[i] * sin(detectInfo[i].pose.a) + detectInfo[i].pose.p.y;
+			//relrotated
 			p = rotate(p, pose.a);
+			//obj
 			p.x += pose.p.x;
 			p.y += pose.p.y;
 			
 			if (p.x > maxBounds.x || p.x < minBounds.x || p.y > maxBounds.y || p.y < minBounds.y) {
 				edge = detectInfo[i].active;
-			} else if (!detectInfo[i].active || diff < -edgeThresh) {
-			
-				if (DEBUG_detect) {
-					//setLCD("Start ");
-					//lcd.print(diff);
-				}
-				
+			} else if (!detectInfo[i].active || diff < -edgeThresh) {				
 				detectInfo[i].start.x = p.x;
-				detectInfo[i].start.y = p.y;
+				detectInfo[i].start.y = p.y;				
 				detectInfo[i].last.x = p.x;
 				detectInfo[i].last.y = p.y;
 				detectInfo[i].active = true;
@@ -101,16 +115,28 @@ void detectCan(int* dist, const Pose& pose, bool reset) {
 		
 		if (edge) {
 			if (DEBUG_detect) {
-				//setLCD("Stop ");
-				//lcd.print(diff);
+				if (DEBUG_useSerial) {
+					Serial.print(" edge");
+				}
 			}
 			
 			double ax = detectInfo[i].start.x - detectInfo[i].last.x;
 			double ay = detectInfo[i].start.y - detectInfo[i].last.y;
 			detectInfo[i].width = hypot(ax, ay);
-			detectInfo[i].active = false;
+			
+			if (DEBUG_detect && DEBUG_useSerial) {
+				Serial.print(" w:");
+				Serial.print(detectInfo[i].width);
+			}
 			
 			if (detectInfo[i].width < minCanWidth || detectInfo[i].width > maxCanWidth) {
+		
+				if (DEBUG_detect && DEBUG_useSerial) {
+					Serial.println();
+				}
+				
+				resetInfo(i);
+				
 				continue;
 			}
 			
@@ -119,7 +145,11 @@ void detectCan(int* dist, const Pose& pose, bool reset) {
 			p.y = (detectInfo[i].start.y + detectInfo[i].last.y) / 2;
 			
 			addCan(p);
-			lcd.clear();
+			resetInfo(i);
+		}
+		
+		if (DEBUG_detect && DEBUG_useSerial) {
+			Serial.println();
 		}
 	}
 }
@@ -173,11 +203,11 @@ int canCount() {
 
 int closestCanTo(const Point& p) {
 	float minDist = 100000;
-	int minIndex = 0;
+	int minIndex = -1;
 	
 	for (int i = 0; i < maxCans; ++i) {
 		float dist = hypot(cans[i].can.p.x - p.x, cans[i].can.p.y - p.y);
-		if (dist < minDist) {
+		if (cans[i].can.ts > 0 && dist < minDist) {
 			minDist = dist;
 			minIndex = i;
 		}

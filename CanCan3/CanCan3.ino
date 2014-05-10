@@ -16,14 +16,15 @@
 
 #include <CanCanState.h>
 
-#define WALLBUFFER (15.0 + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET)
-
 TimedAction detectAction = TimedAction(40, doDetect);
 
 bool resetDetect = true;
 
 void doDetect() {
   resetDetect = RobotBase.getVelocity() < 2.0;
+  if (resetDetect) {
+  	return;
+  	}
   
   int dist[4];
   dist[0] = ranging::getDistance(IRL);
@@ -75,6 +76,12 @@ void initGripper() {
   Gripper.setPeriod(20);
 }
 
+void initBumpers() {
+  pinMode(IRB_FR, INPUT);
+  pinMode(IRB_F, INPUT);
+  pinMode(IRB_FL, INPUT);
+}
+
 void fillPath() {
   path.clear();
   Point p;
@@ -117,10 +124,11 @@ void fillPath() {
   
 void setup() {
   initLCD();
-  setArena(2, WALLBUFFER);
+  setArena(2, 10.0 + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET);
   initDetect();
   initGripper();
   initBase();
+  initBumpers();
 }
 
 void loop() {

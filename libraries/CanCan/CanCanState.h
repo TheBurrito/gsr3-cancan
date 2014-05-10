@@ -108,32 +108,34 @@ void driveCanMode(bool init) {
 		curCan = detect::closestCanTo(arena.goal);
 		Point can = detect::getCan(curCan);
 		
-		if (DEBUG_detect) {
-			lcd.clear();
-			lcd.setCursor(0,0);
-			lcd.print(curCan);
-			lcd.print(":");
-			lcd.print(can.x);
-			lcd.print(",");
-			lcd.print(can.y);
+		if (DEBUG_detect && DEBUG_useSerial) {
+			Serial.print("Can-");
+			Serial.print(curCan);
+			Serial.print(":");
+			Serial.print((int)can.x);
+			Serial.print(",");
+			Serial.print((int)can.y);
 		}
 		
-		Point pos;
+		/*Point pos;
 		pos.x = RobotBase.getX();
 		pos.y = RobotBase.getY();
 		
 		float dx = can.x - pos.x;
 		float dy = can.y - pos.y;
 		float len = hypot(dx, dy);
-		float r = (len - 10) / len;
+		float r = (len - 5) / len;
 		float x = dx * r + pos.x;
-		float y = dy * r + pos.y;
+		float y = dy * r + pos.y;*/
 		
-		if (DEBUG_detect) {
-			lcd.setCursor(0, 1);
-			lcd.print(x);
-			lcd.print(", ");
-			lcd.print(y);
+		float x = can.x;
+		float y = can.y;
+		
+		if (DEBUG_detect && DEBUG_useSerial) {
+			Serial.print(" - ");
+			Serial.print(x);
+			Serial.print(", ");
+			Serial.println(y);
 		}
 		
 		RobotBase.turnToAndDrive(x, y, false);
@@ -150,11 +152,12 @@ void grabMode(bool init) {
 		Gripper.close();
 	} else {
 		if (Gripper.done()) {
+			detect::removeCan(curCan);
+			curCan = -1;
+			
 			if (digitalReadFast(IRB_F) == 0) {
 				curState = mDriveGoal;
 			} else {
-				detect::removeCan(curCan);
-				curCan = -1;
 				
 				Gripper.open();
 				Gripper.quickMove();
@@ -198,9 +201,6 @@ void dropMode(bool init) {
 		Gripper.open();
 	} else {
 		if (Gripper.done()) {
-			detect::removeCan(curCan);
-			curCan = -1;
-			
 			curState = mBackup;
 		}
 	}
