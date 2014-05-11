@@ -57,9 +57,9 @@ LiquidTWI2 lcd(0);
 2 - contigent arena size ?x?
 3 - home arena size 4'x8'
 */
-#define ARENA 3
+#define ARENA 1
 
-#if ARENA == 1 // ft * in/ft * cm/in#define ARENA_W 7#define ARENA_L 10
+#if ARENA == 1 // ft * in/ft * cm/in#define ARENA_W 7#define ARENA_L 9.8
 #define MAX_X ARENA_L * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
 #define MAX_Y ARENA_W / 2 * 12 * 2.54 - WALL_BUFFER - ROBOT_FRONT_OFFSET - ROBOT_GRIP_OFFSET
 #define MIN_X 0 + WALL_BUFFER + ROBOT_FRONT_OFFSET + ROBOT_GRIP_OFFSET
@@ -728,7 +728,7 @@ void gripper() {
 }
 
 void checkBumpers() {
-    if (mode == mWander && RobotBase.getX() < GOAL_LINE) {
+    if ((mode == mWander || mode == mDriveCan) && RobotBase.getX() < GOAL_LINE) {
         if (digitalRead(IRB_FL) == 0 || digitalRead(IRB_FR) == 0
                 || digitalRead(IRB_F) == 0) {
             gripState = gClose;
